@@ -1,0 +1,75 @@
+rules_version = '2';
+
+// Paste into Firebase console > Firestore Database > Rules.
+// Role source of truth: staff/{uid} doc, where {uid} is the person's Firebase
+// Auth uid (see db.js DB.createStaffAuthAccount). The bootstrap Owner account
+// (owner@didi-malatang.local) is trusted unconditionally so the shop can never get
+// locked out even before its staff doc exists.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwnerEmail() {
+      return isSignedIn() && request.auth.token.email == 'owner@didi-malatang.local';
+    }
+
+    function myRole() {
+      return get(/databases/$(database)/documents/staff/$(request.auth.uid)).data.role;
+    }
+
+    function roleRank(role) {
+      return role == 'App Owner' ? 4 : role == 'Admin' ? 3 : role == 'Manager' ? 2 : role == 'Employee' ? 1 : 0;
+    }
+
+    function roleAtLeast(minRole) {
+      return isSignedIn() && (isOwnerEmail() || roleRank(myRole()) >= roleRank(minRole));
+    }
+
+    match /staff/{staffId} {
+      allow read: if isSignedIn();
+      // Managers can only create Employee/Manager profiles (the Timesheet
+      // page's "Add employee" form); Admin/Owner can create any role (the
+      // Admin page's account form). Without this split a Manager could craft
+      // a raw write to self-promote to Admin/Owner.
+      allow create: if isOwnerEmail()
+        || roleAtLeast('Admin')
+        || (roleAtLeast('Manager') && request.resource.data.role in ['Employee', 'Manager']);
+      // Managers may only edit/remove Employee-role profiles; Admin/Owner can
+      // touch anyone except demoting/removing the App Owner themselves.
+      allow update, delete: if isOwnerEmail()
+        || roleAtLeast('Admin') && resource.data.role != 'App Owner'
+        || (roleAtLeast('Manager') && resource.data.role == 'Employee');
+    }
+
+    match /attendance/{attendanceId} {
+      allow read: if isSignedIn();
+      allow write: if roleAtLeast('Manager');
+    }
+
+    match /warehouseItems/{itemId} {
+      allow read: if isSignedIn();
+      allow write: if roleAtLeast('Manager');
+    }
+
+    match /routines/{routineId} {
+      allow read: if isSignedIn();
+      // Any signed-in staff can update lastInspectedAt/lastInspectedImageUrl
+      // by uploading an inspection photo; only Manager+ create/delete routines.
+      allow create, delete: if roleAtLeast('Manager');
+      allow update: if isSignedIn();
+    }
+
+    match /routineInspections/{logId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update, delete: if roleAtLeast('Manager');
+    }
+
+    match /notifications/{noteId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn();
+    }
+  }
+}

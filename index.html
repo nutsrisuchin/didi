@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Didi Malatang Hub</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div id="login-gate" class="login-gate">
+      <div class="login-card">
+        <p class="eyebrow">Didi Malatang</p>
+        <h1>Didi Malatang Hub</h1>
+        <form id="login-form" class="stack">
+          <label>
+            Name
+            <input name="name" placeholder="Your name, or 'Owner'" required />
+          </label>
+          <label>
+            PIN
+            <input name="pin" type="password" inputmode="numeric" autocomplete="current-password" required />
+          </label>
+          <button class="btn" type="submit">Log in</button>
+          <p id="login-error" class="error" hidden></p>
+        </form>
+      </div>
+    </div>
+
+    <div id="app-root" hidden>
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Operations dashboard</p>
+          <h1>Didi Malatang Hub</h1>
+        </div>
+        <nav class="topnav" aria-label="Main navigation">
+          <button class="nav-btn active" data-action="nav-home" data-view="home">Home</button>
+          <button class="nav-btn" data-action="nav-timesheet" data-view="timesheet">Timesheet</button>
+          <button class="nav-btn" data-action="nav-warehouse" data-view="warehouse">Warehouse</button>
+          <button class="nav-btn" data-action="nav-routines" data-view="routines">Inspections</button>
+          <button class="nav-btn" data-action="nav-admin" data-view="admin" data-role-min="Admin">Admin</button>
+          <button class="nav-btn" data-action="nav-notifications" data-view="notifications">Notifications</button>
+        </nav>
+        <div class="user-chip">
+          <span id="current-user-label"></span>
+          <button class="btn secondary" data-action="logout">Log out</button>
+        </div>
+      </header>
+
+      <main class="app-shell">
+        <aside class="sidebar">
+          <h2>Quick overview</h2>
+          <div id="sidebar-summary" class="sidebar-card"></div>
+        </aside>
+        <section id="view" class="content"></section>
+      </main>
+    </div>
+
+    <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore-compat.js"></script>
+    <script src="firebase-config.js"></script>
+    <script src="db.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>

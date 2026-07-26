@@ -1,0 +1,96 @@
+// Firebase wrapper: auth (PIN-based), Firestore (state cache + onSnapshot).
+// No Firebase Storage — item/routine photos are compressed client-side (see
+// fileToCompressedDataUrl in app.js) and stored as base64 data URLs directly
+// in Firestore docs, since Storage now requires the paid Blaze plan even for
+// tiny usage. Loaded after firebase-config.js and the Firebase compat SDK
+// <script> tags, before app.js.
+
+firebase.initializeApp(window.FIREBASE_CONFIG);
+const auth = firebase.auth();
+const firestore = firebase.firestore();
+auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+
+const EMAIL_DOMAIN = 'didi-malatang.local';
+const OWNER_EMAIL = `owner@${EMAIL_DOMAIN}`;
+
+function slugify(name) {
+  return (
+    String(name)
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/(^-|-$)/g, '') || 'user'
+  );
+}
+
+function emailForName(name) {
+  return `${slugify(name)}@${EMAIL_DOMAIN}`;
+}
+
+const DB = {
+  OWNER_EMAIL,
+
+  uid(prefix = 'id') {
+    return `${prefix}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
+  },
+
+  // Auth: "name" of 'owner' (case-insensitive) maps to the bootstrap Owner
+  // account so the shop can never get locked out even before any staff
+  // Firestore doc exists.
+  async login(name, pin) {
+    const email = name.trim().toLowerCase() === 'owner' ? OWNER_EMAIL : emailForName(name);
+    const credential = await auth.signInWithEmailAndPassword(email, pin);
+    return credential.user;
+  },
+
+  async logout() {
+    await auth.signOut();
+  },
+
+  onAuthChange(callback) {
+    return auth.onAuthStateChanged(callback);
+  },
+
+  // Creates a new Auth login for a staff member without signing out the
+  // admin/manager currently doing the creating: done on a throwaway secondary
+  // Firebase App instance, which is torn down immediately after.
+  async createStaffAuthAccount(name, pin) {
+    const secondaryApp = firebase.initializeApp(window.FIREBASE_CONFIG, `secondary-${Date.now()}`);
+    try {
+      const credential = await secondaryApp.auth().createUserWithEmailAndPassword(emailForName(name), pin);
+      return credential.user.uid;
+    } finally {
+      await secondaryApp.auth().signOut();
+      await secondaryApp.delete();
+    }
+  },
+
+  watch(collection, callback) {
+    return firestore.collection(collection).onSnapshot(
+      (snapshot) => {
+        callback(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
+      },
+      (error) => console.error(`watch(${collection}) failed`, error)
+    );
+  },
+
+  async getOnce(collection, id) {
+    const doc = await firestore.collection(collection).doc(id).get();
+    return doc.exists ? { id: doc.id, ...doc.data() } : null;
+  },
+
+  // record.id is required (callers generate it via DB.uid or a deterministic
+  // key like `${date}_${staffId}`) so writes double as upserts.
+  async put(collection, record) {
+    const { id, ...data } = record;
+    await firestore.collection(collection).doc(id).set(data, { merge: true });
+    return id;
+  },
+
+  async del(collection, id) {
+    await firestore.collection(collection).doc(id).delete();
+  }
+};
+
+window.DB = DB;
+window.emailForName = emailForName;
