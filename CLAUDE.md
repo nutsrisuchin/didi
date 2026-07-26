@@ -9,7 +9,7 @@ similar "no-build, vanilla JS + Firebase, hosted on GitHub Pages" project.
 **Didi Malatang Hub** — a staff timesheet/payroll, ingredient warehouse, and routine
 food-safety-style inspection app for **Didi Malatang**, a malatang restaurant. Vanilla HTML/CSS/JS, no
 framework, no build step, no `package.json`. Backed by Firebase (Firestore + Auth only — no
-Storage, see below). Deployed on GitHub Pages, auto-deploys on push to `master`.
+Storage, see below). Deployed on GitHub Pages, auto-deploys on push to `main`.
 
 | File | Purpose |
 |---|---|
@@ -184,7 +184,7 @@ Restaurant staff use this on their phones, so these are checked for every new UI
 
 ## [Reusable] GitHub Pages deployment gotchas
 
-- No build step: pushing to `master` is the deploy. There is no staging environment.
+- No build step: pushing to `main` is the deploy. There is no staging environment.
 - **The GitHub Pages CDN caches aggressively** — a push can take longer than expected to be
   visible; verify via `curl -sI <url> | grep -Ei 'last-modified|age'` against the live URL
   before assuming a just-shipped fix is broken.

@@ -57,6 +57,7 @@ textarea { min-height: 5rem; resize: vertical; }
   padding-top: calc(1.25rem + env(safe-area-inset-top));
   background: linear-gradient(135deg, #14213d, #2d5aa7);
 }
+.login-gate[hidden] { display: none; }
 .login-card {
   background: white;
   border-radius: 18px;
