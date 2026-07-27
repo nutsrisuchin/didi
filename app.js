@@ -335,6 +335,13 @@ function renderHome() {
   const todayAttendance = state.attendance.filter((entry) => entry.date === state.currentDate).length;
   return `
     <div class="grid">
+      <div class="row" style="gap:0.9rem">
+        <img class="home-logo" src="logo.jpg" alt="Didi Malatang" />
+        <div>
+          <p class="eyebrow" style="margin:0">Didi Malatang</p>
+          <h2 style="margin:0; font-size:1.15rem">Welcome back${state.currentStaff ? `, ${state.currentStaff.name}` : ''}</h2>
+        </div>
+      </div>
       <section class="card">
         <div class="row">
           <h2 style="margin:0">Today's snapshot</h2>
