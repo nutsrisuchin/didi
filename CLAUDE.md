@@ -228,8 +228,11 @@ above; images live inline on the docs below as base64 data URLs.
   twice for the same person/day upserts instead of duplicating): `staffId`, `date`
   (`YYYY-MM-DD`), `clockIn`, `clockOut`, `lateMinutes`, `workedHours`, `pay` (part-time only,
   `null` for full-time), `createdAt`.
-- **`warehouseItems`**: `name`, `unit` (free text — no fixed unit list), `quantity`,
-  `imageUrl` (compressed base64 JPEG data URL, or `''`), `createdAt`.
+- **`warehouseItems`**: `category` (free text — no fixed category list, same convention as
+  `unit`; the Warehouse view groups items into collapsible sections by this field, falling
+  back to `'อื่นๆ'` when unset), `name`, `unit` (free text — no fixed unit list), `quantity`
+  (decimal, e.g. `1.5` for a partially-used pack), `imageUrl` (compressed base64 JPEG data URL,
+  or `''`), `createdAt`.
 - **`routines`**: `name`, `frequencyDays`, `lastInspectedAt`, `lastInspectedImageUrl`,
   `createdAt`. `getRoutineStatus()` compares `lastInspectedAt + frequencyDays` against `now`.
 - **`routineInspections`** (append-only audit log, separate from `routines` itself): `routineId`,

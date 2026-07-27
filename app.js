@@ -11,7 +11,8 @@ const state = {
   warehouseItems: [],
   routines: [],
   routineInspections: [],
-  notifications: []
+  notifications: [],
+  collapsedStockCategories: new Set()
 };
 
 const notifiedOverdueRoutineIds = new Set();
@@ -450,24 +451,90 @@ function renderTimesheet() {
   `;
 }
 
+// One-time seed for the "Import from stock sheet" button — quantities are the
+// most recent (26/7/69) column from stock_data_1.md, the paper stock check log.
+const STOCK_SEED_DATA = [
+  { category: 'ฟองเต้าหู้', name: 'ฟองเต้าหู้แห้ง แบบแท่ง', unit: 'แพ็ค', quantity: 2 },
+  { category: 'ฟองเต้าหู้', name: 'ฟองเต้าหู้แห้ง เส้นเล็ก', unit: 'ถุง', quantity: 1.8 },
+  { category: 'ฟองเต้าหู้', name: 'ฟองเต้าหู้ม้วน/ทอด', unit: 'แพ็ค', quantity: 42 },
+  { category: 'เส้น,อื่นๆ', name: 'บะหมี่ผัก มันม่วง', unit: 'ห่อ', quantity: 32 },
+  { category: 'เส้น,อื่นๆ', name: 'เส้นหนึบ มันเทศ', unit: 'ห่อ', quantity: 0 },
+  { category: 'เส้น,อื่นๆ', name: 'เส้นหนึบ ฟักทอง', unit: 'ห่อ', quantity: 0 },
+  { category: 'เส้น,อื่นๆ', name: 'เส้นหนึบใหญ่', unit: 'ห่อ', quantity: 179 },
+  { category: 'เส้น,อื่นๆ', name: 'เส้นหนึบกลมเล็ก', unit: 'ห่อ', quantity: 39 },
+  { category: 'เส้น,อื่นๆ', name: 'เส้นอูด้ง', unit: 'ห่อ', quantity: 26 },
+  { category: 'เส้น,อื่นๆ', name: 'เส้นดำ รากเฟิร์น', unit: 'ม้วน', quantity: 9 },
+  { category: 'เส้น,อื่นๆ', name: 'เส้นราเมง', unit: 'ห่อ', quantity: 23 },
+  { category: 'เส้น,อื่นๆ', name: 'สาหร่ายวากาเมะ', unit: 'กระปุก', quantity: 2.2 },
+  { category: 'เส้น,อื่นๆ', name: 'ผักกุ๊งฉ่าย', unit: 'แพ็ค', quantity: 8 },
+  { category: 'เครื่องดื่ม', name: 'น้ำหวังเหล่าจี๋', unit: 'กระป๋อง', quantity: 46 },
+  { category: 'เครื่องดื่ม', name: 'น้ำฟักเขียว', unit: 'กระป๋อง', quantity: 12 },
+  { category: 'เครื่องดื่ม', name: 'นมแดง', unit: 'กระป๋อง', quantity: 26 },
+  { category: 'เครื่องดื่ม', name: 'ชานมไต้หวัน', unit: 'ขวด', quantity: 11 },
+  { category: 'เครื่องดื่ม', name: 'ชาเขียวบ้วย', unit: 'ขวด', quantity: 0 },
+  { category: 'เครื่องดื่ม', name: 'น้ำจับเลี้ยง', unit: 'กระป๋อง', quantity: 24 },
+  { category: 'พลาสติก,อื่นๆ', name: 'ถ้วยน้ำจิ้ม 2 ออนซ์', unit: 'แพ็ค', quantity: 26 },
+  { category: 'พลาสติก,อื่นๆ', name: 'ถ้วยน้ำจิ้ม 1 ออนซ์', unit: 'แพ็ค', quantity: 53 },
+  { category: 'พลาสติก,อื่นๆ', name: 'กระดาษทิชชู่แบบแขวน', unit: 'แพ็ค', quantity: 4 },
+  { category: 'พลาสติก,อื่นๆ', name: 'กระดาษทิชชู่อันเล็ก', unit: 'แพ็ค', quantity: 31 },
+  { category: 'พลาสติก,อื่นๆ', name: 'กระดาษใบเสร็จ pos', unit: 'ม้วน', quantity: 10 },
+  { category: 'พลาสติก,อื่นๆ', name: 'กระดาษใบเสร็จ grab 57x40', unit: 'ม้วน', quantity: 54 },
+  { category: 'พลาสติก,อื่นๆ', name: 'ถ้วยอาหารพลาสติก 1,000ml', unit: 'แพ็ค', quantity: 11 },
+  { category: 'อื่นๆ', name: 'เกี๊ยวกุ้งหมูสับ', unit: 'แพ็ค', quantity: 3 }
+];
+
+function groupWarehouseItemsByCategory() {
+  const groups = new Map();
+  state.warehouseItems.forEach((item) => {
+    const category = item.category || 'อื่นๆ';
+    if (!groups.has(category)) groups.set(category, []);
+    groups.get(category).push(item);
+  });
+  return groups;
+}
+
 function renderWarehouse() {
   const canManage = roleAtLeast('Manager');
-  const items = state.warehouseItems.map((item) => `
-    <div class="list-item">
-      <div>
-        <strong>${item.name}</strong>
-        <div class="muted">${item.quantity} ${item.unit} remaining</div>
-        ${item.imageUrl ? `<img class="img-preview" src="${item.imageUrl}" alt="${item.name}" />` : ''}
+  const categories = Array.from(new Set(state.warehouseItems.map((item) => item.category || 'อื่นๆ')));
+  const categoryOptions = categories.map((category) => `<option value="${category}"></option>`).join('');
+  const groups = groupWarehouseItemsByCategory();
+
+  const sections = Array.from(groups.entries()).map(([category, items]) => {
+    const collapsed = state.collapsedStockCategories.has(category);
+    const rows = items.map((item) => `
+      <div class="stock-row">
+        ${item.imageUrl
+          ? `<img class="stock-thumb" src="${item.imageUrl}" alt="${item.name}" />`
+          : '<div class="stock-thumb-empty"></div>'}
+        <span class="stock-name">${item.name}</span>
+        <span class="stock-qty">${item.quantity}</span>
+        <span class="stock-unit">${item.unit}</span>
       </div>
       ${canManage ? `
-        <div class="row">
-          <input class="mini-input" type="number" min="0" value="${item.quantity}" data-quantity-for="${item.id}" />
+        <div class="stock-manage">
+          <input class="mini-input" type="number" min="0" step="any" value="${item.quantity}" data-quantity-for="${item.id}" />
           <button class="btn secondary" data-action="update-item-quantity" data-id="${item.id}">Update</button>
           <button class="btn danger" data-action="delete-item" data-id="${item.id}">Delete</button>
         </div>
       ` : ''}
-    </div>
-  `).join('');
+    `).join('');
+
+    return `
+      <div class="stock-category">
+        <button type="button" class="stock-category-header" data-action="toggle-warehouse-category" data-category="${category}">
+          <span class="stock-toggle ${collapsed ? 'collapsed' : ''}">▼</span> หมวด${category}
+        </button>
+        ${collapsed ? '' : `
+          <div class="stock-table">
+            <div class="stock-row stock-row-head">
+              <span>รายการ</span><span>ชื่อ</span><span>จำนวน</span><span>หน่วย</span>
+            </div>
+            ${rows}
+          </div>
+        `}
+      </div>
+    `;
+  }).join('');
 
   return `
     <div class="grid">
@@ -477,16 +544,21 @@ function renderWarehouse() {
           <form data-form="item-form" class="stack">
             <div class="form-grid">
               <label>
-                Item name
+                หมวด (category)
+                <input name="category" list="category-options" placeholder="e.g. เครื่องดื่ม" required />
+                <datalist id="category-options">${categoryOptions}</datalist>
+              </label>
+              <label>
+                รายการ (item name)
                 <input name="name" required />
               </label>
               <label>
-                Unit
+                หน่วย (unit)
                 <input name="unit" placeholder="box, bottle, pack, kg" required />
               </label>
               <label>
-                Remaining units
-                <input name="quantity" type="number" min="0" required />
+                จำนวน (remaining units)
+                <input name="quantity" type="number" min="0" step="any" required />
               </label>
               <label>
                 Image
@@ -497,9 +569,16 @@ function renderWarehouse() {
           </form>
         </section>
       ` : ''}
+      ${canManage && state.warehouseItems.length === 0 ? `
+        <section class="card">
+          <h2 style="margin-top:0">Import past stock sheet</h2>
+          <p class="muted">One-time import of the ${STOCK_SEED_DATA.length} items and หมวด from the most recent paper stock check (26/7/69). This only shows while the warehouse is empty.</p>
+          <button class="btn secondary" data-action="import-stock-seed">Import from stock sheet</button>
+        </section>
+      ` : ''}
       <section class="card">
-        <h2 style="margin-top:0">Items</h2>
-        <div class="list">${items || '<p class="muted">No items yet.</p>'}</div>
+        <h2 style="margin-top:0">Stock sheet</h2>
+        <div class="stock-sheet">${sections || '<p class="muted">No items yet.</p>'}</div>
       </section>
     </div>
   `;
@@ -694,6 +773,7 @@ async function handleForm(name, formData) {
     const imageUrl = imageFile && imageFile.name ? await fileToCompressedDataUrl(imageFile) : '';
     const item = {
       id,
+      category: formData.get('category') || 'อื่นๆ',
       name: formData.get('name'),
       unit: formData.get('unit'),
       quantity: Number(formData.get('quantity') || 0),
@@ -781,6 +861,29 @@ async function handleAction(action, data) {
     const id = attendanceId(data.id, state.currentDate);
     await DB.del('attendance', id);
     removeLocal('attendance', id);
+    render();
+    return;
+  }
+
+  if (action === 'toggle-warehouse-category') {
+    if (state.collapsedStockCategories.has(data.category)) {
+      state.collapsedStockCategories.delete(data.category);
+    } else {
+      state.collapsedStockCategories.add(data.category);
+    }
+    render();
+    return;
+  }
+
+  if (action === 'import-stock-seed') {
+    if (!roleAtLeast('Manager')) return;
+    if (state.warehouseItems.length > 0) return;
+    for (const seed of STOCK_SEED_DATA) {
+      const item = { id: DB.uid('item'), ...seed, imageUrl: '', createdAt: nowISO() };
+      await DB.put('warehouseItems', item);
+      upsertLocal('warehouseItems', item);
+    }
+    await pushNotification('Stock sheet imported', `${STOCK_SEED_DATA.length} items imported from the 26/7/69 stock check.`);
     render();
     return;
   }

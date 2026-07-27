@@ -69,5 +69,43 @@ textarea { min-height: 5rem; resize: vertical; }
 .login-card h1 { margin-bottom: 1rem; }
 .error { color: #a93a3a; font-size: 0.9rem; }
 .user-chip { display: flex; align-items: center; gap: 0.75rem; color: white; font-size: 0.9rem; }
+.stock-sheet { display: grid; gap: 1rem; }
+.stock-category { border: 1px solid #e2eaf4; border-radius: 14px; overflow: hidden; }
+.stock-category-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  min-height: 44px;
+  padding: 0.75rem 0.9rem;
+  border: none;
+  background: #eaf2ff;
+  color: #14213d;
+  font-size: 1rem;
+  font-weight: 600;
+  text-align: left;
+}
+.stock-toggle { display: inline-block; transition: transform 0.15s ease; }
+.stock-toggle.collapsed { transform: rotate(-90deg); }
+.stock-table { display: flex; flex-direction: column; }
+.stock-row {
+  display: grid;
+  grid-template-columns: 56px 1fr 70px 70px;
+  gap: 0.6rem;
+  align-items: center;
+  padding: 0.6rem 0.9rem;
+  border-top: 1px solid #edf3f8;
+}
+.stock-row-head { font-size: 0.8rem; color: #5f7698; text-transform: uppercase; letter-spacing: 0.04em; background: #f4f7fb; }
+.stock-thumb, .stock-thumb-empty { width: 44px; height: 44px; border-radius: 10px; object-fit: cover; background: #eaf2ff; }
+.stock-qty { font-weight: 600; text-align: center; }
+.stock-unit { color: #5f7698; text-align: center; }
+.stock-manage { display: flex; gap: 0.5rem; flex-wrap: wrap; padding: 0 0.9rem 0.75rem; border-top: none; }
 @media (max-width: 900px) { .app-shell { grid-template-columns: 1fr; } .sidebar { border-right: none; border-bottom: 1px solid #d6e3f5; } }
-@media (max-width: 650px) { .topbar { flex-direction: column; align-items: flex-start; } .form-grid { grid-template-columns: 1fr; } .user-chip { width: 100%; justify-content: space-between; } }
+@media (max-width: 650px) {
+  .topbar { flex-direction: column; align-items: flex-start; }
+  .form-grid { grid-template-columns: 1fr; }
+  .user-chip { width: 100%; justify-content: space-between; }
+  .stock-row { grid-template-columns: 40px 1fr 50px 50px; gap: 0.4rem; padding: 0.5rem 0.6rem; font-size: 0.9rem; }
+  .stock-thumb, .stock-thumb-empty { width: 36px; height: 36px; }
+}
