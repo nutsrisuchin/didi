@@ -13,9 +13,29 @@ const state = {
   routineInspections: [],
   notifications: [],
   holidays: [],
+  warehouseLogs: [],
   collapsedStockCategories: new Set(),
   financialMonth: monthISO()
 };
+
+// Firestore values (staff.role, staff.employmentType, routine status) stay in
+// English since they're compared against directly (ROLE_ORDER, firestore.rules
+// roleRank(), etc.) — these maps translate them for display only.
+const ROLE_LABEL_TH = { 'App Owner': 'เจ้าของร้าน', Admin: 'แอดมิน', Manager: 'ผู้จัดการ', Employee: 'พนักงาน' };
+const EMPLOYMENT_TYPE_LABEL_TH = { 'full-time': 'เต็มเวลา', 'part-time': 'พาร์ทไทม์' };
+const ROUTINE_STATUS_LABEL_TH = { overdue: 'เลยกำหนด', 'on-track': 'ตามกำหนด' };
+
+function roleLabel(role) {
+  return ROLE_LABEL_TH[role] || role;
+}
+
+function employmentTypeLabel(type) {
+  return EMPLOYMENT_TYPE_LABEL_TH[type] || type;
+}
+
+function routineStatusLabel(status) {
+  return ROUTINE_STATUS_LABEL_TH[status] || status;
+}
 
 const notifiedOverdueRoutineIds = new Set();
 let watchersStarted = false;
@@ -155,7 +175,7 @@ function checkRoutineOverdueNotifications() {
     const status = getRoutineStatus(routine);
     if (status === 'overdue' && !notifiedOverdueRoutineIds.has(routine.id)) {
       notifiedOverdueRoutineIds.add(routine.id);
-      pushNotification('Routine inspection overdue', `${routine.name} is past due and hasn't been inspected.`);
+      pushNotification('เช็คลิสต์เลยกำหนด', `${routine.name} เลยกำหนดแล้วและยังไม่ได้ทำ`);
     } else if (status !== 'overdue' && notifiedOverdueRoutineIds.has(routine.id)) {
       notifiedOverdueRoutineIds.delete(routine.id);
     }
@@ -234,6 +254,10 @@ function startWatchers() {
     state.holidays = records.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
     render();
   });
+  DB.watch('warehouseLogs', (records) => {
+    state.warehouseLogs = records;
+    render();
+  });
 }
 
 function initAuthGate() {
@@ -246,7 +270,7 @@ function initAuthGate() {
     try {
       await DB.login(formData.get('name'), formData.get('pin'));
     } catch (error) {
-      errorEl.textContent = 'Login failed — check the name and PIN.';
+      errorEl.textContent = 'เข้าสู่ระบบไม่สำเร็จ — กรุณาตรวจสอบชื่อและ PIN';
       errorEl.hidden = false;
     }
   };
@@ -262,7 +286,7 @@ function initAuthGate() {
     state.currentUser = user;
     await ensureStaffDoc(user);
     if (!state.currentRole) {
-      errorEl.textContent = 'No active staff account found for this login. Contact an admin.';
+      errorEl.textContent = 'ไม่พบบัญชีพนักงานที่ใช้งานได้สำหรับการเข้าสู่ระบบนี้ กรุณาติดต่อแอดมิน';
       errorEl.hidden = false;
       await DB.logout();
       return;
@@ -283,19 +307,19 @@ function renderSidebarSummary() {
   summary.innerHTML = `
     <div class="stat">
       <strong>${state.staff.filter((s) => s.employmentType).length}</strong>
-      <span class="muted">Staff on payroll</span>
+      <span class="muted">พนักงานในระบบเงินเดือน</span>
     </div>
     <div class="stat">
       <strong>${dueRoutines}</strong>
-      <span class="muted">Routine inspections due</span>
+      <span class="muted">เช็คลิสต์ที่ครบกำหนด</span>
     </div>
     <div class="stat">
       <strong>${lowStock}</strong>
-      <span class="muted">Low-stock items</span>
+      <span class="muted">สินค้าใกล้หมด</span>
     </div>
     <div class="stat">
       <strong>${unreadNotifications}</strong>
-      <span class="muted">Unread notifications</span>
+      <span class="muted">แจ้งเตือนที่ยังไม่อ่าน</span>
     </div>
   `;
 }
@@ -333,47 +357,49 @@ function render() {
 function renderHome() {
   const dueRoutines = state.routines.filter((routine) => getRoutineStatus(routine) === 'overdue');
   const todayAttendance = state.attendance.filter((entry) => entry.date === state.currentDate).length;
+  const lowStockCount = state.warehouseItems.filter((item) => Number(item.quantity) <= 3).length;
   return `
     <div class="grid">
       <div class="row" style="gap:0.9rem">
         <img class="home-logo" src="logo.jpg" alt="Didi Malatang" />
         <div>
           <p class="eyebrow" style="margin:0">Didi Malatang</p>
-          <h2 style="margin:0; font-size:1.15rem">Welcome back${state.currentStaff ? `, ${state.currentStaff.name}` : ''}</h2>
+          <h2 style="margin:0; font-size:1.15rem">ยินดีต้อนรับกลับ${state.currentStaff ? ` คุณ${state.currentStaff.name}` : ''}</h2>
         </div>
       </div>
       <section class="card">
         <div class="row">
-          <h2 style="margin:0">Today's snapshot</h2>
-          <span class="badge">${todayAttendance} marked present</span>
+          <h2 style="margin:0">สรุปวันนี้</h2>
+          <span class="badge">${todayAttendance} คนลงเวลาแล้ว</span>
         </div>
         <div class="grid grid-2" style="margin-top:0.8rem">
-          <div class="card" style="box-shadow:none; border:1px solid #edf3f8;">
-            <h3 style="margin:0 0 0.5rem">Checklist</h3>
-            <p class="muted">${dueRoutines.length ? `${dueRoutines.length} items need attention.` : 'All checklists are current.'}</p>
+          <div class="card" style="box-shadow:none; border:1px solid var(--color-border-soft);">
+            <h3 style="margin:0 0 0.5rem">เช็คลิสต์</h3>
+            <p class="muted">${dueRoutines.length ? `มี ${dueRoutines.length} รายการที่ต้องดำเนินการ` : 'เช็คลิสต์ทั้งหมดเป็นปัจจุบันแล้ว'}</p>
           </div>
-          <div class="card" style="box-shadow:none; border:1px solid #edf3f8;">
-            <h3 style="margin:0 0 0.5rem">Warehouse health</h3>
-            <p class="muted">${state.warehouseItems.filter((item) => Number(item.quantity) <= 3).length} items are low in stock.</p>
+          <div class="card clickable" data-action="nav-warehouse" style="box-shadow:none; border:1px solid var(--color-border-soft);">
+            <h3 style="margin:0 0 0.5rem">สุขภาพคลังสินค้า</h3>
+            <p class="muted">มี ${lowStockCount} รายการใกล้หมด</p>
+            <p class="small" style="margin:0.4rem 0 0; color:var(--color-primary);">แตะเพื่อดูลำดับการเติมสต็อก →</p>
           </div>
         </div>
       </section>
       <section class="card">
-        <h2 style="margin-top:0">Due checklists</h2>
+        <h2 style="margin-top:0">เช็คลิสต์ที่ครบกำหนด</h2>
         <div class="list">
           ${dueRoutines.length ? dueRoutines.map((routine) => `
             <div class="list-item">
               <div>
                 <strong>${routine.name}</strong>
-                <div class="muted">Last completed ${formatDate(routine.lastInspectedAt)}</div>
+                <div class="muted">ทำครั้งล่าสุดเมื่อ ${formatDate(routine.lastInspectedAt)}</div>
               </div>
-              <button class="btn secondary" data-action="go-routines">Open checklist</button>
+              <button class="btn secondary" data-action="go-routines">เปิดเช็คลิสต์</button>
             </div>
-          `).join('') : '<p class="muted">No overdue checklist items right now.</p>'}
+          `).join('') : '<p class="muted">ไม่มีเช็คลิสต์ที่เลยกำหนดในตอนนี้</p>'}
         </div>
       </section>
       <section class="card">
-        <h2 style="margin-top:0">Notifications</h2>
+        <h2 style="margin-top:0">การแจ้งเตือน</h2>
         <div class="list">
           ${state.notifications.slice(0, 5).length ? state.notifications.slice(0, 5).map((note) => `
             <div class="list-item">
@@ -383,7 +409,7 @@ function renderHome() {
               </div>
               <span class="badge">${formatDate(note.createdAt)}</span>
             </div>
-          `).join('') : '<p class="muted">No notifications yet.</p>'}
+          `).join('') : '<p class="muted">ยังไม่มีการแจ้งเตือน</p>'}
         </div>
       </section>
     </div>
@@ -403,17 +429,17 @@ function renderTimesheet() {
       <div class="list-item">
         <div>
           <strong>${employee.name}</strong>
-          <div class="muted">${employee.employmentType} · ${employee.role} · ${formatCurrency(employee.dailyRate)}/day</div>
+          <div class="muted">${employmentTypeLabel(employee.employmentType)} · ${roleLabel(employee.role)} · ${formatCurrency(employee.dailyRate)}/วัน</div>
           ${entry
-            ? `<div class="small">Clock in ${entry.clockIn} · Clock out ${entry.clockOut} · Worked ${entry.workedHours}h · Late ${entry.lateMinutes}min${entry.pay !== null ? ` · Pay ${formatCurrency(entry.pay)}` : ''}${entry.isHoliday ? ' · <span class="badge">Holiday 1.5x</span>' : ''}</div>`
-            : '<div class="small">Not marked today</div>'}
+            ? `<div class="small">เข้างาน ${entry.clockIn} · เลิกงาน ${entry.clockOut} · ทำงาน ${entry.workedHours} ชม. · มาสาย ${entry.lateMinutes} นาที${entry.pay !== null ? ` · ค่าจ้าง ${formatCurrency(entry.pay)}` : ''}${entry.isHoliday ? ' · <span class="badge">วันหยุดนักขัตฤกษ์ x1.5</span>' : ''}</div>`
+            : '<div class="small">ยังไม่ได้ลงเวลาวันนี้</div>'}
         </div>
         ${canManage ? `
           <div class="row">
             <input class="mini-input" type="time" value="${entry?.clockIn || schedule.start}" data-arrival-for="${employee.id}" />
-            <button class="btn" data-action="mark-attendance" data-id="${employee.id}">Mark present</button>
-            <button class="btn secondary" data-action="clear-attendance" data-id="${employee.id}">Clear</button>
-            ${employee.role === 'Employee' ? `<button class="btn danger" data-action="delete-staff" data-id="${employee.id}">Remove employee</button>` : ''}
+            <button class="btn" data-action="mark-attendance" data-id="${employee.id}">บันทึกเข้างาน</button>
+            <button class="btn secondary" data-action="clear-attendance" data-id="${employee.id}">ล้างข้อมูล</button>
+            ${employee.role === 'Employee' ? `<button class="btn danger" data-action="delete-staff" data-id="${employee.id}">ลบพนักงาน</button>` : ''}
           </div>
         ` : ''}
       </div>
@@ -423,54 +449,54 @@ function renderTimesheet() {
   return `
     <div class="grid">
       <section class="card">
-        <h2 style="margin-top:0">Timesheet overview</h2>
+        <h2 style="margin-top:0">ภาพรวมการลงเวลา</h2>
         <form data-form="date-form" class="row">
           <label style="min-width:220px">
-            Select date
+            เลือกวันที่
             <input type="date" name="date" value="${state.currentDate}" />
           </label>
-          <button class="btn" type="submit">Load</button>
+          <button class="btn" type="submit">โหลดข้อมูล</button>
         </form>
       </section>
       <section class="card">
         <div class="row">
-          <h2 style="margin:0">${canManage ? 'Employees' : 'Your attendance'} for ${formatDate(state.currentDate)}</h2>
+          <h2 style="margin:0">${canManage ? 'พนักงาน' : 'การลงเวลาของคุณ'} วันที่ ${formatDate(state.currentDate)}</h2>
         </div>
-        <div class="list" style="margin-top:0.8rem">${rows || '<p class="muted">Nothing to show.</p>'}</div>
+        <div class="list" style="margin-top:0.8rem">${rows || '<p class="muted">ไม่มีข้อมูลให้แสดง</p>'}</div>
       </section>
       ${canManage ? `
         <section class="card">
-          <h2 style="margin-top:0">Add employee</h2>
+          <h2 style="margin-top:0">เพิ่มพนักงาน</h2>
           <form data-form="employee-form" class="stack">
             <div class="form-grid">
               <label>
-                Name
+                ชื่อ
                 <input name="name" required />
               </label>
               <label>
-                Role
+                ตำแหน่ง
                 <select name="role">
-                  <option value="Employee">Employee</option>
-                  <option value="Manager">Manager</option>
+                  <option value="Employee">พนักงาน</option>
+                  <option value="Manager">ผู้จัดการ</option>
                 </select>
               </label>
               <label>
-                Employment type
+                ประเภทการจ้างงาน
                 <select name="employmentType" required>
-                  <option value="full-time">Full-time</option>
-                  <option value="part-time">Part-time</option>
+                  <option value="full-time">เต็มเวลา</option>
+                  <option value="part-time">พาร์ทไทม์</option>
                 </select>
               </label>
               <label>
-                Daily rate (฿)
+                ค่าจ้างต่อวัน (฿)
                 <input name="dailyRate" type="number" min="0" value="440" required />
               </label>
               <label>
-                Login PIN
+                รหัส PIN สำหรับเข้าสู่ระบบ
                 <input name="pin" type="password" inputmode="numeric" required />
               </label>
             </div>
-            <button class="btn" type="submit">Add employee</button>
+            <button class="btn" type="submit">เพิ่มพนักงาน</button>
           </form>
         </section>
       ` : ''}
@@ -510,6 +536,40 @@ const STOCK_SEED_DATA = [
   { category: 'อื่นๆ', name: 'เกี๊ยวกุ้งหมูสับ', unit: 'แพ็ค', quantity: 3 }
 ];
 
+// Same methodology the user already uses by hand in their own stock-check
+// notes: only count periods where quantity actually went down (a restock
+// between checks would otherwise look like negative usage), average that
+// into a per-day usage rate, then derive a reorder point (7 days of lead
+// time + 30% safety margin) and a suggested order quantity (top up to 14
+// days of cover). Needs at least two quantity log entries with a decline
+// between them — fresh items show "not enough data yet" until then.
+function computeStockInsight(item) {
+  const logs = state.warehouseLogs
+    .filter((log) => log.itemId === item.id)
+    .sort((a, b) => (a.recordedAt || '').localeCompare(b.recordedAt || ''));
+  let declineTotal = 0;
+  let daysTotal = 0;
+  for (let i = 1; i < logs.length; i++) {
+    const prev = logs[i - 1];
+    const curr = logs[i];
+    const decline = Number(prev.quantity) - Number(curr.quantity);
+    const days = (new Date(curr.recordedAt) - new Date(prev.recordedAt)) / (1000 * 60 * 60 * 24);
+    if (decline > 0 && days > 0) {
+      declineTotal += decline;
+      daysTotal += days;
+    }
+  }
+  if (daysTotal <= 0 || declineTotal <= 0) return { hasData: false };
+  const usagePerDay = declineTotal / daysTotal;
+  return {
+    hasData: true,
+    usagePerDay,
+    daysLeft: Number(item.quantity) / usagePerDay,
+    reorderPoint: usagePerDay * 7 * 1.3,
+    suggestedOrder: Math.max(0, usagePerDay * 14 - Number(item.quantity))
+  };
+}
+
 function groupWarehouseItemsByCategory() {
   const groups = new Map();
   state.warehouseItems.forEach((item) => {
@@ -526,6 +586,26 @@ function renderWarehouse() {
   const categoryOptions = categories.map((category) => `<option value="${category}"></option>`).join('');
   const groups = groupWarehouseItemsByCategory();
 
+  const insights = state.warehouseItems.map((item) => ({ item, ...computeStockInsight(item) }));
+  const withData = insights.filter((entry) => entry.hasData);
+  const priorityItems = withData
+    .filter((entry) => entry.daysLeft <= 14 || Number(entry.item.quantity) <= entry.reorderPoint)
+    .sort((a, b) => a.daysLeft - b.daysLeft);
+  const noDataCount = insights.length - withData.length;
+  const priorityRows = priorityItems.map(({ item, usagePerDay, daysLeft, suggestedOrder }) => {
+    const urgent = daysLeft <= 3;
+    return `
+      <div class="list-item">
+        <div>
+          <strong>${item.name}</strong>
+          <div class="muted">ใช้วันละ ~${usagePerDay.toFixed(1)} ${item.unit} · เหลืออีก ~${Math.max(0, Math.floor(daysLeft))} วัน</div>
+          ${suggestedOrder > 0 ? `<div class="small">แนะนำสั่งเพิ่ม ~${Math.ceil(suggestedOrder)} ${item.unit}</div>` : ''}
+        </div>
+        <span class="badge ${urgent ? 'overdue' : ''}">${urgent ? 'เร่งด่วน' : 'ควรเติมเร็วๆ นี้'}</span>
+      </div>
+    `;
+  }).join('');
+
   const sections = Array.from(groups.entries()).map(([category, items]) => {
     const collapsed = state.collapsedStockCategories.has(category);
     const rows = items.map((item) => `
@@ -540,8 +620,8 @@ function renderWarehouse() {
       ${canManage ? `
         <div class="stock-manage">
           <input class="mini-input" type="number" min="0" step="any" value="${item.quantity}" data-quantity-for="${item.id}" />
-          <button class="btn secondary" data-action="update-item-quantity" data-id="${item.id}">Update</button>
-          <button class="btn danger" data-action="delete-item" data-id="${item.id}">Delete</button>
+          <button class="btn secondary" data-action="update-item-quantity" data-id="${item.id}">อัปเดต</button>
+          <button class="btn danger" data-action="delete-item" data-id="${item.id}">ลบ</button>
         </div>
       ` : ''}
     `).join('');
@@ -565,47 +645,52 @@ function renderWarehouse() {
 
   return `
     <div class="grid">
+      <section class="card">
+        <h2 style="margin-top:0">ลำดับความสำคัญในการเติมสต็อก</h2>
+        ${priorityItems.length ? `<div class="list">${priorityRows}</div>` : '<p class="muted">ทุกรายการมีสต็อกเพียงพอในตอนนี้</p>'}
+        ${noDataCount ? `<p class="small muted" style="margin-top:0.6rem">${noDataCount} รายการยังไม่มีข้อมูลเพียงพอในการคำนวณ — ระบบจะเริ่มคำนวณอัตราการใช้หลังมีการอัปเดตจำนวนอย่างน้อย 2 ครั้ง</p>` : ''}
+      </section>
       ${canManage ? `
         <section class="card">
-          <h2 style="margin-top:0">Warehouse inventory</h2>
+          <h2 style="margin-top:0">คลังสินค้า</h2>
           <form data-form="item-form" class="stack">
             <div class="form-grid">
               <label>
-                หมวด (category)
-                <input name="category" list="category-options" placeholder="e.g. เครื่องดื่ม" required />
+                หมวด
+                <input name="category" list="category-options" placeholder="เช่น เครื่องดื่ม" required />
                 <datalist id="category-options">${categoryOptions}</datalist>
               </label>
               <label>
-                รายการ (item name)
+                ชื่อสินค้า
                 <input name="name" required />
               </label>
               <label>
-                หน่วย (unit)
-                <input name="unit" placeholder="box, bottle, pack, kg" required />
+                หน่วย
+                <input name="unit" placeholder="กล่อง, ขวด, แพ็ค, กก." required />
               </label>
               <label>
-                จำนวน (remaining units)
+                จำนวนคงเหลือ
                 <input name="quantity" type="number" min="0" step="any" required />
               </label>
               <label>
-                Image
+                รูปภาพ
                 <input name="image" type="file" accept="image/*" capture="environment" />
               </label>
             </div>
-            <button class="btn" type="submit">Add item</button>
+            <button class="btn" type="submit">เพิ่มสินค้า</button>
           </form>
         </section>
       ` : ''}
       ${canManage && state.warehouseItems.length === 0 ? `
         <section class="card">
-          <h2 style="margin-top:0">Import past stock sheet</h2>
-          <p class="muted">One-time import of the ${STOCK_SEED_DATA.length} items and หมวด from the most recent paper stock check (26/7/69). This only shows while the warehouse is empty.</p>
-          <button class="btn secondary" data-action="import-stock-seed">Import from stock sheet</button>
+          <h2 style="margin-top:0">นำเข้าข้อมูลสต็อกเก่า</h2>
+          <p class="muted">นำเข้าสินค้า ${STOCK_SEED_DATA.length} รายการและหมวดหมู่จากใบเช็คสต็อกล่าสุด (26/7/69) ครั้งเดียว — ปุ่มนี้จะแสดงเฉพาะตอนที่คลังสินค้ายังว่างอยู่</p>
+          <button class="btn secondary" data-action="import-stock-seed">นำเข้าจากใบเช็คสต็อก</button>
         </section>
       ` : ''}
       <section class="card">
-        <h2 style="margin-top:0">Stock sheet</h2>
-        <div class="stock-sheet">${sections || '<p class="muted">No items yet.</p>'}</div>
+        <h2 style="margin-top:0">ใบเช็คสต็อก</h2>
+        <div class="stock-sheet">${sections || '<p class="muted">ยังไม่มีสินค้า</p>'}</div>
       </section>
     </div>
   `;
@@ -628,14 +713,14 @@ function renderRoutines() {
     `).join('');
 
     const reportRows = reports.slice(0, 3).map((report) => {
-      const staffName = state.staff.find((entry) => entry.id === report.staffId)?.name || 'Unknown';
+      const staffName = state.staff.find((entry) => entry.id === report.staffId)?.name || 'ไม่ทราบชื่อ';
       const results = report.subtaskResults || [];
       const done = results.filter((task) => task.done).length;
       return `
         <div class="list-item">
           <div>
             <strong>${formatDate(report.inspectedAt)}</strong> · ${staffName}
-            <div class="muted">${results.length ? `${done}/${results.length} sub-tasks done` : 'No sub-tasks'}${report.notes ? ` · ${report.notes}` : ''}</div>
+            <div class="muted">${results.length ? `ทำเสร็จ ${done}/${results.length} งานย่อย` : 'ไม่มีงานย่อย'}${report.notes ? ` · ${report.notes}` : ''}</div>
           </div>
         </div>
       `;
@@ -646,24 +731,24 @@ function renderRoutines() {
         <div class="row" style="justify-content:space-between">
           <div>
             <strong>${routine.name}</strong>
-            <div class="muted">Every ${routine.frequencyDays} day(s) · Last completed ${formatDate(routine.lastInspectedAt)}</div>
-            <div class="small">Status: <span class="badge ${status === 'overdue' ? 'overdue' : ''}">${status}</span></div>
+            <div class="muted">ทุก ${routine.frequencyDays} วัน · ทำครั้งล่าสุดเมื่อ ${formatDate(routine.lastInspectedAt)}</div>
+            <div class="small">สถานะ: <span class="badge ${status === 'overdue' ? 'overdue' : ''}">${routineStatusLabel(status)}</span></div>
           </div>
-          ${canManage ? `<button class="btn danger" data-action="delete-routine" data-id="${routine.id}">Delete</button>` : ''}
+          ${canManage ? `<button class="btn danger" data-action="delete-routine" data-id="${routine.id}">ลบ</button>` : ''}
         </div>
         ${routine.description ? `<p class="small">${routine.description}</p>` : ''}
         ${routine.detail ? `<p class="small muted">${routine.detail}</p>` : ''}
-        ${subtasks.length ? `<div class="stack">${subtaskRows}</div>` : '<p class="muted small">No sub-tasks — just submit a report when done.</p>'}
+        ${subtasks.length ? `<div class="stack">${subtaskRows}</div>` : '<p class="muted small">ไม่มีงานย่อย — ส่งรายงานได้เลยเมื่อทำเสร็จ</p>'}
         <label>
-          Notes for this report
-          <textarea data-checklist-notes="${routine.id}" placeholder="Optional notes"></textarea>
+          หมายเหตุสำหรับรายงานนี้
+          <textarea data-checklist-notes="${routine.id}" placeholder="หมายเหตุ (ถ้ามี)"></textarea>
         </label>
         <div class="row">
           <input type="file" accept="image/*" capture="environment" data-routine-image-for="${routine.id}" />
-          <button class="btn" data-action="submit-checklist-report" data-id="${routine.id}">Submit report</button>
+          <button class="btn" data-action="submit-checklist-report" data-id="${routine.id}">ส่งรายงาน</button>
         </div>
         ${routine.lastInspectedImageUrl ? `<img class="img-preview" src="${routine.lastInspectedImageUrl}" alt="${routine.name}" />` : ''}
-        ${reportRows ? `<div class="stack"><h3 class="small" style="margin:0.25rem 0 0">Recent reports</h3>${reportRows}</div>` : ''}
+        ${reportRows ? `<div class="stack"><h3 class="small" style="margin:0.25rem 0 0">รายงานล่าสุด</h3>${reportRows}</div>` : ''}
       </div>
     `;
   }).join('');
@@ -672,37 +757,37 @@ function renderRoutines() {
     <div class="grid">
       ${canManage ? `
         <section class="card">
-          <h2 style="margin-top:0">Create checklist</h2>
+          <h2 style="margin-top:0">สร้างเช็คลิสต์</h2>
           <form data-form="routine-form" class="stack">
             <div class="form-grid">
               <label>
-                Checklist name
+                ชื่อเช็คลิสต์
                 <input name="name" required />
               </label>
               <label>
-                Frequency (days)
+                ความถี่ (วัน)
                 <input name="frequencyDays" type="number" min="1" value="7" required />
               </label>
             </div>
             <label>
-              Description
-              <input name="description" placeholder="Short summary" />
+              คำอธิบาย
+              <input name="description" placeholder="สรุปสั้นๆ" />
             </label>
             <label>
-              Detail / instructions
-              <textarea name="detail" placeholder="Longer instructions for whoever completes this checklist"></textarea>
+              รายละเอียด / คำแนะนำ
+              <textarea name="detail" placeholder="คำแนะนำโดยละเอียดสำหรับผู้ทำเช็คลิสต์นี้"></textarea>
             </label>
             <label>
-              Sub-tasks (one per line)
-              <textarea name="subtasks" placeholder="Check fridge temperature&#10;Wipe down counters"></textarea>
+              งานย่อย (บรรทัดละ 1 งาน)
+              <textarea name="subtasks" placeholder="ตรวจอุณหภูมิตู้เย็น&#10;เช็ดทำความสะอาดโต๊ะ"></textarea>
             </label>
-            <button class="btn" type="submit">Create checklist</button>
+            <button class="btn" type="submit">สร้างเช็คลิสต์</button>
           </form>
         </section>
       ` : ''}
       <section class="card">
-        <h2 style="margin-top:0">Checklists</h2>
-        <div class="list">${rows || '<p class="muted">No checklists yet.</p>'}</div>
+        <h2 style="margin-top:0">เช็คลิสต์ทั้งหมด</h2>
+        <div class="list">${rows || '<p class="muted">ยังไม่มีเช็คลิสต์</p>'}</div>
       </section>
     </div>
   `;
@@ -713,54 +798,54 @@ function renderAdmin() {
     <div class="list-item">
       <div>
         <strong>${person.name}</strong>
-        <div class="muted">${person.role}${person.employmentType ? ` · ${person.employmentType} · ${formatCurrency(person.dailyRate)}/day` : ''}</div>
+        <div class="muted">${roleLabel(person.role)}${person.employmentType ? ` · ${employmentTypeLabel(person.employmentType)} · ${formatCurrency(person.dailyRate)}/วัน` : ''}</div>
       </div>
-      ${person.role !== 'App Owner' ? `<button class="btn danger" data-action="delete-staff" data-id="${person.id}">Remove access</button>` : ''}
+      ${person.role !== 'App Owner' ? `<button class="btn danger" data-action="delete-staff" data-id="${person.id}">ลบสิทธิ์การเข้าถึง</button>` : ''}
     </div>
   `).join('');
 
   return `
     <div class="grid">
       <section class="card">
-        <h2 style="margin-top:0">Admin management</h2>
-        <p class="muted">Removing access deletes the app profile — the underlying login can't be hard-deleted from the browser, so removed staff simply won't have a profile to sign in with anymore.</p>
+        <h2 style="margin-top:0">จัดการผู้ดูแลระบบ</h2>
+        <p class="muted">การลบสิทธิ์จะลบเฉพาะโปรไฟล์ในแอป — บัญชีเข้าสู่ระบบเดิมไม่สามารถลบถาวรได้จากเบราว์เซอร์ ดังนั้นพนักงานที่ถูกลบจะไม่มีโปรไฟล์ให้เข้าสู่ระบบได้อีกต่อไป</p>
         <form data-form="staff-form" class="stack">
           <div class="form-grid">
             <label>
-              Name
+              ชื่อ
               <input name="name" required />
             </label>
             <label>
-              Role
+              ตำแหน่ง
               <select name="role">
-                <option value="App Owner">App Owner</option>
-                <option value="Admin">Admin</option>
-                <option value="Manager">Manager</option>
-                <option value="Employee">Employee</option>
+                <option value="App Owner">เจ้าของร้าน</option>
+                <option value="Admin">แอดมิน</option>
+                <option value="Manager">ผู้จัดการ</option>
+                <option value="Employee">พนักงาน</option>
               </select>
             </label>
             <label>
-              Employment type (staff only)
+              ประเภทการจ้างงาน (เฉพาะพนักงาน)
               <select name="employmentType">
-                <option value="">N/A</option>
-                <option value="full-time">Full-time</option>
-                <option value="part-time">Part-time</option>
+                <option value="">ไม่มี</option>
+                <option value="full-time">เต็มเวลา</option>
+                <option value="part-time">พาร์ทไทม์</option>
               </select>
             </label>
             <label>
-              Daily rate (฿, staff only)
+              ค่าจ้างต่อวัน (฿, เฉพาะพนักงาน)
               <input name="dailyRate" type="number" min="0" value="0" />
             </label>
             <label>
-              Login PIN
+              รหัส PIN สำหรับเข้าสู่ระบบ
               <input name="pin" type="password" inputmode="numeric" required />
             </label>
           </div>
-          <button class="btn" type="submit">Add account</button>
+          <button class="btn" type="submit">เพิ่มบัญชี</button>
         </form>
       </section>
       <section class="card">
-        <h2 style="margin-top:0">Roles</h2>
+        <h2 style="margin-top:0">รายชื่อและตำแหน่ง</h2>
         <div class="list">${rows}</div>
       </section>
     </div>
@@ -803,8 +888,8 @@ function renderFinancial() {
     <div class="list-item">
       <div>
         <strong>${employee.name}</strong>
-        <div class="muted">${employee.employmentType} · ${formatCurrency(employee.dailyRate)}/day</div>
-        <div class="small">${actualDays} actual day(s), ${projectedDays} projected day(s)</div>
+        <div class="muted">${employmentTypeLabel(employee.employmentType)} · ${formatCurrency(employee.dailyRate)}/วัน</div>
+        <div class="small">${actualDays} วันจริง, ${projectedDays} วันคาดการณ์</div>
       </div>
       <strong>${formatCurrency(total)}</strong>
     </div>
@@ -816,7 +901,7 @@ function renderFinancial() {
         <strong>${formatDate(holiday.date)}</strong>
         ${holiday.name ? `<div class="muted">${holiday.name}</div>` : ''}
       </div>
-      <button class="btn danger" data-action="delete-holiday" data-id="${holiday.id}">Remove</button>
+      <button class="btn danger" data-action="delete-holiday" data-id="${holiday.id}">ลบ</button>
     </div>
   `).join('');
 
@@ -824,36 +909,36 @@ function renderFinancial() {
     <div class="grid">
       <section class="card">
         <div class="row" style="justify-content:space-between">
-          <h2 style="margin:0">Financial — expected salary</h2>
-          <span class="badge">Total ${formatCurrency(grandTotal)}</span>
+          <h2 style="margin:0">การเงิน — เงินเดือนที่คาดการณ์</h2>
+          <span class="badge">รวม ${formatCurrency(grandTotal)}</span>
         </div>
         <form data-form="financial-period-form" class="row" style="margin-top:0.8rem">
           <label style="min-width:220px">
-            Month
+            เดือน
             <input type="month" name="month" value="${state.financialMonth}" />
           </label>
-          <button class="btn" type="submit">View</button>
+          <button class="btn" type="submit">ดูข้อมูล</button>
         </form>
-        <p class="muted small" style="margin-top:0.5rem">Days up to today use actual attendance and lateness; remaining days in the month assume on-time attendance at the daily rate.</p>
+        <p class="muted small" style="margin-top:0.5rem">วันที่ผ่านมาแล้วจนถึงวันนี้ใช้ข้อมูลการลงเวลาและความล่าช้าจริง ส่วนวันที่เหลือในเดือนจะคำนวณโดยสมมติว่ามาตรงเวลาตามค่าจ้างต่อวัน</p>
       </section>
       <section class="card">
-        <h2 style="margin-top:0">Expected salary by employee</h2>
-        <div class="list">${rows || '<p class="muted">No paid staff yet.</p>'}</div>
+        <h2 style="margin-top:0">เงินเดือนที่คาดการณ์ต่อพนักงาน</h2>
+        <div class="list">${rows || '<p class="muted">ยังไม่มีพนักงานที่รับค่าจ้าง</p>'}</div>
       </section>
       <section class="card">
-        <h2 style="margin-top:0">Public holidays (1.5x pay)</h2>
+        <h2 style="margin-top:0">วันหยุดนักขัตฤกษ์ (จ่าย 1.5 เท่า)</h2>
         <form data-form="holiday-form" class="row">
           <label style="min-width:180px">
-            Date
+            วันที่
             <input type="date" name="date" required />
           </label>
           <label style="min-width:180px">
-            Name
-            <input name="name" placeholder="e.g. Songkran" />
+            ชื่อวันหยุด
+            <input name="name" placeholder="เช่น สงกรานต์" />
           </label>
-          <button class="btn secondary" type="submit">Add holiday</button>
+          <button class="btn secondary" type="submit">เพิ่มวันหยุด</button>
         </form>
-        <div class="list" style="margin-top:0.8rem">${holidayRows || '<p class="muted">No holidays added yet.</p>'}</div>
+        <div class="list" style="margin-top:0.8rem">${holidayRows || '<p class="muted">ยังไม่มีวันหยุดที่เพิ่ม</p>'}</div>
       </section>
     </div>
   `;
@@ -864,8 +949,8 @@ function renderNotifications() {
     <div class="grid">
       <section class="card">
         <div class="row">
-          <h2 style="margin:0">Notifications</h2>
-          <button class="btn secondary" data-action="mark-all-read">Mark all as read</button>
+          <h2 style="margin:0">การแจ้งเตือน</h2>
+          <button class="btn secondary" data-action="mark-all-read">ทำเครื่องหมายว่าอ่านแล้วทั้งหมด</button>
         </div>
         <div class="list" style="margin-top:0.8rem">
           ${state.notifications.length ? state.notifications.map((note) => `
@@ -876,7 +961,7 @@ function renderNotifications() {
               </div>
               <span class="badge ${note.read ? '' : 'overdue'}">${formatDate(note.createdAt)}</span>
             </div>
-          `).join('') : '<p class="muted">No notifications yet.</p>'}
+          `).join('') : '<p class="muted">ยังไม่มีการแจ้งเตือน</p>'}
         </div>
       </section>
     </div>
@@ -920,7 +1005,7 @@ async function handleForm(name, formData) {
   if (name === 'employee-form') {
     if (!roleAtLeast('Manager')) return;
     const employee = await createStaffMember(formData);
-    await pushNotification('Employee added', `${employee.name} is ready for the timesheet.`);
+    await pushNotification('เพิ่มพนักงานแล้ว', `${employee.name} พร้อมใช้งานในระบบลงเวลาแล้ว`);
     render();
     return;
   }
@@ -928,7 +1013,7 @@ async function handleForm(name, formData) {
   if (name === 'staff-form') {
     if (!roleAtLeast('Admin')) return;
     const person = await createStaffMember(formData);
-    await pushNotification('Admin account added', `${person.name} now has ${person.role} access.`);
+    await pushNotification('เพิ่มบัญชีผู้ดูแลแล้ว', `${person.name} ได้รับสิทธิ์ ${roleLabel(person.role)} แล้ว`);
     render();
     return;
   }
@@ -949,7 +1034,10 @@ async function handleForm(name, formData) {
     };
     await DB.put('warehouseItems', item);
     upsertLocal('warehouseItems', item);
-    await pushNotification('Warehouse item added', `${item.name} is now tracked.`);
+    const log = { id: DB.uid('wlog'), itemId: item.id, quantity: item.quantity, recordedAt: nowISO() };
+    await DB.put('warehouseLogs', log);
+    upsertLocal('warehouseLogs', log);
+    await pushNotification('เพิ่มสินค้าคลังแล้ว', `${item.name} ถูกเพิ่มเข้าระบบติดตามสต็อกแล้ว`);
     render();
     return;
   }
@@ -974,7 +1062,7 @@ async function handleForm(name, formData) {
     };
     await DB.put('routines', routine);
     upsertLocal('routines', routine);
-    await pushNotification('Checklist created', `${routine.name} will repeat every ${routine.frequencyDays} day(s).`);
+    await pushNotification('สร้างเช็คลิสต์แล้ว', `${routine.name} จะทำซ้ำทุก ${routine.frequencyDays} วัน`);
     render();
     return;
   }
@@ -1049,7 +1137,7 @@ async function handleAction(action, data) {
     };
     await DB.put('attendance', record);
     upsertLocal('attendance', record);
-    await pushNotification('Attendance marked', `${employee.name} logged work for ${formatDate(state.currentDate)}.`);
+    await pushNotification('บันทึกเวลาทำงานแล้ว', `${employee.name} ลงเวลาทำงานสำหรับวันที่ ${formatDate(state.currentDate)}`);
     render();
     return;
   }
@@ -1080,8 +1168,11 @@ async function handleAction(action, data) {
       const item = { id: DB.uid('item'), ...seed, imageUrl: '', createdAt: nowISO() };
       await DB.put('warehouseItems', item);
       upsertLocal('warehouseItems', item);
+      const log = { id: DB.uid('wlog'), itemId: item.id, quantity: item.quantity, recordedAt: nowISO() };
+      await DB.put('warehouseLogs', log);
+      upsertLocal('warehouseLogs', log);
     }
-    await pushNotification('Stock sheet imported', `${STOCK_SEED_DATA.length} items imported from the 26/7/69 stock check.`);
+    await pushNotification('นำเข้าข้อมูลสต็อกแล้ว', `นำเข้าสินค้า ${STOCK_SEED_DATA.length} รายการจากใบเช็คสต็อกวันที่ 26/7/69`);
     render();
     return;
   }
@@ -1095,6 +1186,9 @@ async function handleAction(action, data) {
     const record = { ...item, quantity };
     await DB.put('warehouseItems', record);
     upsertLocal('warehouseItems', record);
+    const log = { id: DB.uid('wlog'), itemId: item.id, quantity, recordedAt: nowISO() };
+    await DB.put('warehouseLogs', log);
+    upsertLocal('warehouseLogs', log);
     render();
     return;
   }
@@ -1171,7 +1265,7 @@ async function handleAction(action, data) {
     };
     await DB.put('routineInspections', report);
     upsertLocal('routineInspections', report);
-    await pushNotification('Checklist report submitted', `${routine.name} was completed successfully.`);
+    await pushNotification('ส่งรายงานเช็คลิสต์แล้ว', `ทำ ${routine.name} เสร็จเรียบร้อยแล้ว`);
     render();
     return;
   }

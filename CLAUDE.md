@@ -180,6 +180,29 @@ of the no-backend approach rather than a bug to silently "fix" with more client-
 de-duplication — a real fix would mean adding Cloud Functions, which is a bigger, separate
 decision.
 
+## Language
+
+The UI is Thai throughout `index.html` and `app.js` — labels, buttons, headings, placeholders,
+status text, and notification titles/details written from here on. **"Didi Malatang Hub" (the
+brand name/title) stays in English on purpose** — don't translate it.
+
+Firestore *values* that the app compares against directly stay in English and are translated
+only for display, via small label maps in `app.js`:
+- `staff.role` (`'App Owner'`/`'Admin'`/`'Manager'`/`'Employee'`) → `roleLabel()` /
+  `ROLE_LABEL_TH`. The raw English value is still what `ROLE_ORDER`, `roleAtLeast()`, and
+  `firestore.rules`' `roleRank()` compare against — never translate the value itself, only
+  wrap it in `roleLabel()` at the point of display. `<option value="Admin">` etc. keep their
+  English `value`, only the visible option text is Thai.
+- `staff.employmentType` (`'full-time'`/`'part-time'`) → `employmentTypeLabel()` /
+  `EMPLOYMENT_TYPE_LABEL_TH`, same rule.
+- `getRoutineStatus()`'s return value (`'overdue'`/`'on-track'`, also used as a CSS class name
+  via `.badge.overdue`) → `routineStatusLabel()` / `ROUTINE_STATUS_LABEL_TH`.
+
+Notifications (`pushNotification()` calls) are now written in Thai at every call site, but
+existing notification docs already in Firestore from before this change remain in English —
+they were not retroactively migrated, matching how the `salary`→`dailyRate` and other schema
+renames were also handled at the boundary rather than backfilled.
+
 ## Theme / color palette
 
 `styles.css` defines the palette as CSS custom properties on `:root` (`--color-primary`,
@@ -243,7 +266,7 @@ Restaurant staff use this on their phones, so these are checked for every new UI
 
 ## Data model (Didi Malatang Hub-specific)
 
-Firestore collections: `staff`, `attendance`, `warehouseItems`, `routines`,
+Firestore collections: `staff`, `attendance`, `warehouseItems`, `warehouseLogs`, `routines`,
 `routineInspections`, `notifications`, `holidays`. No Storage bucket — see the "no Firebase
 Storage" note above; images live inline on the docs below as base64 data URLs.
 
@@ -264,6 +287,20 @@ Storage" note above; images live inline on the docs below as base64 data URLs.
   back to `'อื่นๆ'` when unset), `name`, `unit` (free text — no fixed unit list), `quantity`
   (decimal, e.g. `1.5` for a partially-used pack), `imageUrl` (compressed base64 JPEG data URL,
   or `''`), `createdAt`.
+- **`warehouseLogs`** (append-only, one doc per quantity snapshot — written whenever an item is
+  created, its quantity is updated, or the stock-sheet seed imports it): `itemId`, `quantity`,
+  `recordedAt`. This is the only history the app keeps of stock levels over time; it drives the
+  Warehouse view's "Restock priorities" section via `computeStockInsight(item)`, which mirrors
+  the usage-rate methodology the user already used by hand in `stock_data_1.md` — average daily
+  usage is `Σ(declines between consecutive logs) / Σ(days over those same declining periods)`
+  (periods where quantity went *up*, i.e. a restock, are excluded so they don't read as negative
+  usage), reorder point is `usagePerDay × 7 × 1.3`, suggested order quantity is
+  `usagePerDay × 14 − currentQuantity`. Needs at least two log entries with an actual decline
+  between them to produce a rate — until then `computeStockInsight` returns `{ hasData: false }`
+  and the item is excluded from the priority list (shown instead as a "not enough data yet"
+  count). The Home page's "Warehouse health" card (`.card.clickable`, `data-action="nav-warehouse"`)
+  navigates straight into this section rather than opening a modal, consistent with this app
+  having no modal system.
 - **`routines`** (user-facing label is "Checklist" throughout the UI — the collection name and
   internal `state.view === 'routines'` were kept as-is to avoid a Firestore-path/rules churn for
   what is otherwise a pure relabel+redesign): `name`, `description` (short free-text summary),

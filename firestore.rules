@@ -53,6 +53,11 @@ service cloud.firestore {
       allow write: if roleAtLeast('Manager');
     }
 
+    match /warehouseLogs/{logId} {
+      allow read: if isSignedIn();
+      allow write: if roleAtLeast('Manager');
+    }
+
     match /routines/{routineId} {
       allow read: if isSignedIn();
       // Any signed-in staff can update lastInspectedAt/lastInspectedImageUrl

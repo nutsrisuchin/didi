@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="th">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -14,14 +14,14 @@
         <h1>Didi Malatang Hub</h1>
         <form id="login-form" class="stack">
           <label>
-            Name
-            <input name="name" placeholder="Your name, or 'Owner'" required />
+            ชื่อ
+            <input name="name" placeholder="ชื่อของคุณ หรือพิมพ์ 'Owner'" required />
           </label>
           <label>
-            PIN
+            รหัส PIN
             <input name="pin" type="password" inputmode="numeric" autocomplete="current-password" required />
           </label>
-          <button class="btn" type="submit">Log in</button>
+          <button class="btn" type="submit">เข้าสู่ระบบ</button>
           <p id="login-error" class="error" hidden></p>
         </form>
       </div>
@@ -30,27 +30,27 @@
     <div id="app-root" hidden>
       <header class="topbar">
         <div>
-          <p class="eyebrow">Operations dashboard</p>
+          <p class="eyebrow">แดชบอร์ดปฏิบัติการ</p>
           <h1>Didi Malatang Hub</h1>
         </div>
         <nav class="topnav" aria-label="Main navigation">
-          <button class="nav-btn active" data-action="nav-home" data-view="home">Home</button>
-          <button class="nav-btn" data-action="nav-timesheet" data-view="timesheet">Timesheet</button>
-          <button class="nav-btn" data-action="nav-warehouse" data-view="warehouse">Warehouse</button>
-          <button class="nav-btn" data-action="nav-routines" data-view="routines">Checklist</button>
-          <button class="nav-btn" data-action="nav-admin" data-view="admin" data-role-min="Admin">Admin</button>
-          <button class="nav-btn" data-action="nav-financial" data-view="financial" data-role-min="Admin">Financial</button>
-          <button class="nav-btn" data-action="nav-notifications" data-view="notifications">Notifications</button>
+          <button class="nav-btn active" data-action="nav-home" data-view="home">หน้าหลัก</button>
+          <button class="nav-btn" data-action="nav-timesheet" data-view="timesheet">ลงเวลา</button>
+          <button class="nav-btn" data-action="nav-warehouse" data-view="warehouse">คลังสินค้า</button>
+          <button class="nav-btn" data-action="nav-routines" data-view="routines">เช็คลิสต์</button>
+          <button class="nav-btn" data-action="nav-admin" data-view="admin" data-role-min="Admin">แอดมิน</button>
+          <button class="nav-btn" data-action="nav-financial" data-view="financial" data-role-min="Admin">การเงิน</button>
+          <button class="nav-btn" data-action="nav-notifications" data-view="notifications">แจ้งเตือน</button>
         </nav>
         <div class="user-chip">
           <span id="current-user-label"></span>
-          <button class="btn secondary" data-action="logout">Log out</button>
+          <button class="btn secondary" data-action="logout">ออกจากระบบ</button>
         </div>
       </header>
 
       <main class="app-shell">
         <aside class="sidebar">
-          <h2>Quick overview</h2>
+          <h2>ภาพรวมด่วน</h2>
           <div id="sidebar-summary" class="sidebar-card"></div>
         </aside>
         <section id="view" class="content"></section>
