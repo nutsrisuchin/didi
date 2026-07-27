@@ -114,14 +114,16 @@ changing permissions: `render()`'s nav gating, each `handleAction`/`handleForm` 
   (`renderAdmin` never renders a delete button for the `App Owner` row, and the rule rejects
   it server-side too).
 - **Admin**: manage `staff` (any role except can't touch the App Owner), timesheet, warehouse,
-  routines, notifications.
+  checklist, notifications, and the **Financial section** (`/financial` view, `data-role-min="Admin"`
+  on its nav button plus an explicit `render()` gate — see Business logic section below).
+  Managers cannot see or reach Financial at all, by design (payroll numbers).
 - **Manager**: add/remove `Employee`-role staff (from the Timesheet page's own "Remove
-  employee" button, not the Admin page — Managers can't reach `/admin` at all), mark
-  attendance, manage warehouse items, create/manage routines. Cannot touch Manager/Admin/Owner
-  accounts.
+  employee" button, not the Admin page — Managers can't reach `/admin` or `/financial` at all),
+  mark attendance, manage warehouse items, create/manage checklists. Cannot touch
+  Manager/Admin/Owner accounts.
 - **Employee**: log in, view their own attendance history only (`renderTimesheet` filters the
-  staff list to `state.currentUser.uid` when `!canManage`), upload routine inspection photos.
-  Read-only everywhere else.
+  staff list to `state.currentUser.uid` when `!canManage`), tick off checklist sub-tasks and
+  submit checklist reports. Read-only everywhere else.
 - A Manager creating a new `staff` doc is restricted server-side to `role in ['Employee',
   'Manager']` (`firestore.rules`) — without that split a Manager could craft a raw Firestore
   write to self-promote to Admin/Owner via the same "create" permission that lets them add
@@ -130,19 +132,39 @@ changing permissions: `render()`'s nav gating, each `handleAction`/`handleForm` 
 
 ## Business logic: schedule, rounding, pay (Didi Malatang-specific)
 
-- Schedule: weekday `10:00–21:00`, weekend `09:00–20:00` (11h span, 1h unpaid lunch → 10
-  worked hours baseline). `scheduleFor(date)` in `app.js`.
+- Schedule: fixed `09:30–20:30` for every day of the week, no weekday/weekend split (11h span,
+  1h unpaid lunch → 10 worked hours baseline). `scheduleFor(date)` in `app.js` — takes a date
+  argument for call-site compatibility but the same schedule now applies regardless of the date.
 - Clock-in is rounded up to the next half hour via `roundUpToHalfHour()` — e.g. `10:10→10:30`,
   `10:35→11:00`. Clock-out is always the fixed schedule end; there's no early-leave/overtime
-  handling yet.
+  handling — the pay model below is explicitly "no OT" (flat day rate regardless of exact hours).
 - `lateMinutes = max(0, roundedArrival − scheduledStart)`;
-  `workedHours = max(0, (scheduledEnd − roundedArrival) − 60min)`.
-- Part-time pay (`calculatePartTimePay`): `440 + (50 if workedHours < 8 else 0) −
-  ceil(lateMinutes/60)×40`, floored at 0.
-- **Full-time pay/deduction math is intentionally not implemented** — full-time attendance
-  records `clockIn`/`clockOut`/`lateMinutes` for the day but `pay` is always `null`. Don't add
-  full-time deduction logic without checking with the user first; this was explicitly deferred
-  ("dig deeper later for full time"), not an oversight.
+  `workedHours = max(0, (scheduledEnd − roundedArrival) − 60min)` — `workedHours` is stored on
+  the attendance record for display only, it no longer feeds the pay formula (see below).
+- **Every employee — full-time and part-time alike — is paid a custom per-person day rate**
+  (`staff.dailyRate`, set when the account is created), not a fixed monthly salary and not a
+  shared base amount. `employmentType` (`full-time`/`part-time`) is still selected at creation
+  and shown in the UI, but as of this pay model it no longer branches the pay calculation itself
+  — both types go through the same formula. This supersedes the previous fixed-440-THB
+  part-time formula and the "full-time pay intentionally unimplemented" deferral; do not
+  reintroduce either without checking with the user first, since this is now a live payroll
+  calculation people are actually paid from.
+- Pay formula (`calculateDailyPay(dailyRate, lateMinutes, isHoliday)`):
+  `max(0, dailyRate × (isHoliday ? 1.5 : 1) − ceil(lateMinutes/60)×40)`. `isHoliday` comes from
+  `isHolidayDate(date)`, which checks the admin-maintained `holidays` collection (see Data model
+  below) — there is no per-attendance-record checkbox for marking a day as a holiday, it's
+  entirely driven by that date list.
+- **Financial section** (`/financial` view in `app.js`, Admin+ only): shows each paid employee's
+  *expected salary for a selected calendar month* (`computeExpectedSalary()`), picked via a
+  native `<input type="month">` (small built-in calendar icon — **not verified on iOS Safari**,
+  which has historically had inconsistent support for `type="month"`; worth testing on a real
+  iPhone before relying on it). For each day of the selected month: if the day is today or
+  earlier, use the real `attendance` record's `pay` if one exists (0 if the employee wasn't
+  marked present that day); if the day is after today, assume on-time full-day attendance and
+  add `calculateDailyPay(dailyRate, 0, isHoliday)`. This is a deliberate simplification agreed
+  with the user — the app has no concept of a fixed weekly roster, so there's no way to know
+  which *future* days a given employee is actually expected to work; it assumes every remaining
+  day in the month. Re-confirm with the user before changing this assumption.
 
 ## Notifications: client-triggered, not server-triggered
 
@@ -157,6 +179,13 @@ may independently write a duplicate notification. Treat this as a known, accepte
 of the no-backend approach rather than a bug to silently "fix" with more client-side
 de-duplication — a real fix would mean adding Cloud Functions, which is a bigger, separate
 decision.
+
+## Theme / color palette
+
+`styles.css` defines the palette as CSS custom properties on `:root` (`--color-primary`,
+`--color-gold`, `--color-bg`, etc.), sampled from the Didi Malatang logo (deep red, gold ring,
+cream). Use the variables rather than new hardcoded hex values when styling anything new, so a
+future palette change stays a one-place edit.
 
 ## [Reusable] Mobile / iOS Safari-first design rules
 
@@ -215,27 +244,43 @@ Restaurant staff use this on their phones, so these are checked for every new UI
 ## Data model (Didi Malatang Hub-specific)
 
 Firestore collections: `staff`, `attendance`, `warehouseItems`, `routines`,
-`routineInspections`, `notifications`. No Storage bucket — see the "no Firebase Storage" note
-above; images live inline on the docs below as base64 data URLs.
+`routineInspections`, `notifications`, `holidays`. No Storage bucket — see the "no Firebase
+Storage" note above; images live inline on the docs below as base64 data URLs.
 
 - **`staff`** (doc ID = Auth `uid`): `name`, `role` (`App Owner`/`Admin`/`Manager`/`Employee`),
   `employmentType` (`full-time`/`part-time`/`''` for non-hourly Owner/Admin accounts),
-  `salary` (full-time fixed monthly amount, `null` otherwise), `active`, `createdAt`. One
-  collection covers both "employee for payroll" and "login account with a role" — the
-  Timesheet page's "Add employee" form and the Admin page's "Add account" form both write
-  here, just with different allowed `role` values (see RBAC section above).
+  `dailyRate` (per-employee day rate in THB, set at creation, `null` when `employmentType` is
+  `''` — see Business logic section above; this replaced a fixed-monthly `salary` field), `active`,
+  `createdAt`. One collection covers both "employee for payroll" and "login account with a
+  role" — the Timesheet page's "Add employee" form and the Admin page's "Add account" form both
+  write here, just with different allowed `role` values (see RBAC section above).
 - **`attendance`** (doc ID = `` `${date}_${staffId}` `` — deterministic, so marking attendance
   twice for the same person/day upserts instead of duplicating): `staffId`, `date`
-  (`YYYY-MM-DD`), `clockIn`, `clockOut`, `lateMinutes`, `workedHours`, `pay` (part-time only,
-  `null` for full-time), `createdAt`.
+  (`YYYY-MM-DD`), `clockIn`, `clockOut`, `lateMinutes`, `workedHours` (display only, doesn't
+  feed pay), `pay` (computed via `calculateDailyPay`, for every employment type now), `isHoliday`
+  (bool, whether `calculateDailyPay` applied the 1.5x multiplier for that date), `createdAt`.
 - **`warehouseItems`**: `category` (free text — no fixed category list, same convention as
   `unit`; the Warehouse view groups items into collapsible sections by this field, falling
   back to `'อื่นๆ'` when unset), `name`, `unit` (free text — no fixed unit list), `quantity`
   (decimal, e.g. `1.5` for a partially-used pack), `imageUrl` (compressed base64 JPEG data URL,
   or `''`), `createdAt`.
-- **`routines`**: `name`, `frequencyDays`, `lastInspectedAt`, `lastInspectedImageUrl`,
-  `createdAt`. `getRoutineStatus()` compares `lastInspectedAt + frequencyDays` against `now`.
-- **`routineInspections`** (append-only audit log, separate from `routines` itself): `routineId`,
-  `staffId`, `imageUrl`, `inspectedAt` — lets the app show who inspected what and when, not
-  just each routine's single latest timestamp.
+- **`routines`** (user-facing label is "Checklist" throughout the UI — the collection name and
+  internal `state.view === 'routines'` were kept as-is to avoid a Firestore-path/rules churn for
+  what is otherwise a pure relabel+redesign): `name`, `description` (short free-text summary),
+  `detail` (longer free-text instructions), `subtasks` (array of `{id, text}`, parsed from a
+  one-line-per-subtask textarea on the create form — no per-definition "done" state, since
+  that's re-ticked fresh on every completion), `frequencyDays`, `lastInspectedAt`,
+  `lastInspectedImageUrl` (persists across completions — only overwritten when a report attaches
+  a new photo), `createdAt`. `getRoutineStatus()` compares `lastInspectedAt + frequencyDays`
+  against `now`.
+- **`routineInspections`** (append-only "checklist report" log, separate from `routines` itself
+  — the Checklist view calls submitting one of these "Submit report"): `routineId`, `staffId`,
+  `imageUrl` (this specific report's photo, `''` if none attached — distinct from the routine's
+  persistent `lastInspectedImageUrl`), `notes` (free text entered at submission), `subtaskResults`
+  (array of `{id, text, done}`, a snapshot of that routine's subtasks and whether each was
+  ticked at submission time), `inspectedAt`.
 - **`notifications`**: `title`, `detail`, `createdAt`, `read`.
+- **`holidays`** (Admin-maintained, drives the 1.5x pay multiplier — see Business logic section
+  above): `date` (`YYYY-MM-DD`), `name` (free text, e.g. "Songkran"), `createdAt`. Managed from
+  a small form inside the Financial view; write access is Admin+ only in `firestore.rules`
+  (Managers can read but not add/remove holidays).

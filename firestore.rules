@@ -71,5 +71,10 @@ service cloud.firestore {
       allow read: if isSignedIn();
       allow write: if isSignedIn();
     }
+
+    match /holidays/{holidayId} {
+      allow read: if isSignedIn();
+      allow write: if roleAtLeast('Admin');
+    }
   }
 }

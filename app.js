@@ -12,7 +12,9 @@ const state = {
   routines: [],
   routineInspections: [],
   notifications: [],
-  collapsedStockCategories: new Set()
+  holidays: [],
+  collapsedStockCategories: new Set(),
+  financialMonth: monthISO()
 };
 
 const notifiedOverdueRoutineIds = new Set();
@@ -20,6 +22,10 @@ let watchersStarted = false;
 
 function todayISO() {
   return new Date().toISOString().slice(0, 10);
+}
+
+function monthISO() {
+  return new Date().toISOString().slice(0, 7);
 }
 
 function nowISO() {
@@ -47,7 +53,7 @@ function toMinutes(time) {
 }
 
 function roundUpToHalfHour(timeValue) {
-  if (!timeValue) return '10:00';
+  if (!timeValue) return '09:30';
   const [hours, minutes] = timeValue.split(':').map(Number);
   const totalMinutes = hours * 60 + minutes;
   const step = 30;
@@ -58,17 +64,25 @@ function roundUpToHalfHour(timeValue) {
   return `${String(roundedHours).padStart(2, '0')}:${String(roundedMinutes).padStart(2, '0')}`;
 }
 
+// Single fixed schedule for every day of the week (9:30-20:30, 1h unpaid
+// lunch → 10 worked hours baseline). Takes dateValue for call-site
+// compatibility even though it's unused now that weekday/weekend no longer differ.
 function scheduleFor(dateValue) {
-  const isWeekend = [0, 6].includes(new Date(dateValue).getDay());
-  return isWeekend ? { start: '09:00', end: '20:00' } : { start: '10:00', end: '21:00' };
+  return { start: '09:30', end: '20:30' };
 }
 
-// Part-time only — full-time deduction rules are intentionally deferred.
-function calculatePartTimePay(workedHours, lateMinutes) {
-  const base = 440;
-  const foodAllowance = workedHours < 8 ? 50 : 0;
+// Every employee (full-time and part-time) is paid a custom per-person day
+// rate now — no more fixed 440 base or monthly salary. No OT: pay is the
+// day rate regardless of exact hours worked, only reduced by lateness and
+// multiplied 1.5x on admin-marked holidays.
+function calculateDailyPay(dailyRate, lateMinutes, isHoliday) {
+  const gross = Number(dailyRate || 0) * (isHoliday ? 1.5 : 1);
   const latePenalty = Math.ceil(lateMinutes / 60) * 40;
-  return Math.max(0, base + foodAllowance - latePenalty);
+  return Math.max(0, gross - latePenalty);
+}
+
+function isHolidayDate(dateValue) {
+  return state.holidays.some((holiday) => holiday.date === dateValue);
 }
 
 // No Firebase Storage (requires the paid Blaze plan) — photos are downscaled
@@ -168,7 +182,7 @@ async function ensureStaffDoc(user) {
       name: 'Owner',
       role: 'App Owner',
       employmentType: '',
-      salary: null,
+      dailyRate: null,
       active: true,
       createdAt: nowISO()
     });
@@ -214,6 +228,10 @@ function startWatchers() {
   });
   DB.watch('notifications', (records) => {
     state.notifications = records.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+    render();
+  });
+  DB.watch('holidays', (records) => {
+    state.holidays = records.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
     render();
   });
 }
@@ -283,7 +301,7 @@ function renderSidebarSummary() {
 }
 
 function render() {
-  if (state.view === 'admin' && !roleAtLeast('Admin')) state.view = 'home';
+  if ((state.view === 'admin' || state.view === 'financial') && !roleAtLeast('Admin')) state.view = 'home';
   renderSidebarSummary();
   document.querySelector('#current-user-label').textContent = state.currentStaff
     ? `${state.currentStaff.name} · ${state.currentRole}`
@@ -301,6 +319,8 @@ function render() {
     content.innerHTML = renderAdmin();
   } else if (state.view === 'notifications') {
     content.innerHTML = renderNotifications();
+  } else if (state.view === 'financial') {
+    content.innerHTML = renderFinancial();
   }
   bindView();
   document.querySelectorAll('.nav-btn').forEach((button) => {
@@ -322,8 +342,8 @@ function renderHome() {
         </div>
         <div class="grid grid-2" style="margin-top:0.8rem">
           <div class="card" style="box-shadow:none; border:1px solid #edf3f8;">
-            <h3 style="margin:0 0 0.5rem">Routine inspections</h3>
-            <p class="muted">${dueRoutines.length ? `${dueRoutines.length} items need attention.` : 'All inspections are current.'}</p>
+            <h3 style="margin:0 0 0.5rem">Checklist</h3>
+            <p class="muted">${dueRoutines.length ? `${dueRoutines.length} items need attention.` : 'All checklists are current.'}</p>
           </div>
           <div class="card" style="box-shadow:none; border:1px solid #edf3f8;">
             <h3 style="margin:0 0 0.5rem">Warehouse health</h3>
@@ -332,17 +352,17 @@ function renderHome() {
         </div>
       </section>
       <section class="card">
-        <h2 style="margin-top:0">Due inspections</h2>
+        <h2 style="margin-top:0">Due checklists</h2>
         <div class="list">
           ${dueRoutines.length ? dueRoutines.map((routine) => `
             <div class="list-item">
               <div>
                 <strong>${routine.name}</strong>
-                <div class="muted">Last inspected ${formatDate(routine.lastInspectedAt)}</div>
+                <div class="muted">Last completed ${formatDate(routine.lastInspectedAt)}</div>
               </div>
-              <button class="btn secondary" data-action="go-routines">Open routine</button>
+              <button class="btn secondary" data-action="go-routines">Open checklist</button>
             </div>
-          `).join('') : '<p class="muted">No overdue inspections right now.</p>'}
+          `).join('') : '<p class="muted">No overdue checklist items right now.</p>'}
         </div>
       </section>
       <section class="card">
@@ -376,9 +396,9 @@ function renderTimesheet() {
       <div class="list-item">
         <div>
           <strong>${employee.name}</strong>
-          <div class="muted">${employee.employmentType} · ${employee.role}</div>
+          <div class="muted">${employee.employmentType} · ${employee.role} · ${formatCurrency(employee.dailyRate)}/day</div>
           ${entry
-            ? `<div class="small">Clock in ${entry.clockIn} · Clock out ${entry.clockOut} · Worked ${entry.workedHours}h · Late ${entry.lateMinutes}min${entry.pay !== null ? ` · Pay ${formatCurrency(entry.pay)}` : ''}</div>`
+            ? `<div class="small">Clock in ${entry.clockIn} · Clock out ${entry.clockOut} · Worked ${entry.workedHours}h · Late ${entry.lateMinutes}min${entry.pay !== null ? ` · Pay ${formatCurrency(entry.pay)}` : ''}${entry.isHoliday ? ' · <span class="badge">Holiday 1.5x</span>' : ''}</div>`
             : '<div class="small">Not marked today</div>'}
         </div>
         ${canManage ? `
@@ -435,8 +455,8 @@ function renderTimesheet() {
                 </select>
               </label>
               <label>
-                Fixed monthly salary (full-time only)
-                <input name="salary" type="number" value="15000" />
+                Daily rate (฿)
+                <input name="dailyRate" type="number" min="0" value="440" required />
               </label>
               <label>
                 Login PIN
@@ -588,19 +608,55 @@ function renderRoutines() {
   const canManage = roleAtLeast('Manager');
   const rows = state.routines.map((routine) => {
     const status = getRoutineStatus(routine);
-    return `
-      <div class="list-item">
-        <div>
-          <strong>${routine.name}</strong>
-          <div class="muted">Every ${routine.frequencyDays} day(s) · Last inspected ${formatDate(routine.lastInspectedAt)}</div>
-          <div class="small">Status: <span class="badge ${status === 'overdue' ? 'overdue' : ''}">${status}</span></div>
-          ${routine.lastInspectedImageUrl ? `<img class="img-preview" src="${routine.lastInspectedImageUrl}" alt="${routine.name}" />` : ''}
+    const subtasks = routine.subtasks || [];
+    const reports = state.routineInspections
+      .filter((entry) => entry.routineId === routine.id)
+      .sort((a, b) => (b.inspectedAt || '').localeCompare(a.inspectedAt || ''));
+
+    const subtaskRows = subtasks.map((task) => `
+      <label class="row" style="gap:0.5rem">
+        <input type="checkbox" data-checklist-task="${routine.id}" data-task-id="${task.id}" />
+        <span>${task.text}</span>
+      </label>
+    `).join('');
+
+    const reportRows = reports.slice(0, 3).map((report) => {
+      const staffName = state.staff.find((entry) => entry.id === report.staffId)?.name || 'Unknown';
+      const results = report.subtaskResults || [];
+      const done = results.filter((task) => task.done).length;
+      return `
+        <div class="list-item">
+          <div>
+            <strong>${formatDate(report.inspectedAt)}</strong> · ${staffName}
+            <div class="muted">${results.length ? `${done}/${results.length} sub-tasks done` : 'No sub-tasks'}${report.notes ? ` · ${report.notes}` : ''}</div>
+          </div>
         </div>
-        <div class="row">
-          <input type="file" accept="image/*" capture="environment" data-routine-image-for="${routine.id}" />
-          <button class="btn" data-action="inspect-routine" data-id="${routine.id}">Upload inspection photo</button>
+      `;
+    }).join('');
+
+    return `
+      <div class="list-item" style="flex-direction:column; align-items:stretch; gap:0.6rem;">
+        <div class="row" style="justify-content:space-between">
+          <div>
+            <strong>${routine.name}</strong>
+            <div class="muted">Every ${routine.frequencyDays} day(s) · Last completed ${formatDate(routine.lastInspectedAt)}</div>
+            <div class="small">Status: <span class="badge ${status === 'overdue' ? 'overdue' : ''}">${status}</span></div>
+          </div>
           ${canManage ? `<button class="btn danger" data-action="delete-routine" data-id="${routine.id}">Delete</button>` : ''}
         </div>
+        ${routine.description ? `<p class="small">${routine.description}</p>` : ''}
+        ${routine.detail ? `<p class="small muted">${routine.detail}</p>` : ''}
+        ${subtasks.length ? `<div class="stack">${subtaskRows}</div>` : '<p class="muted small">No sub-tasks — just submit a report when done.</p>'}
+        <label>
+          Notes for this report
+          <textarea data-checklist-notes="${routine.id}" placeholder="Optional notes"></textarea>
+        </label>
+        <div class="row">
+          <input type="file" accept="image/*" capture="environment" data-routine-image-for="${routine.id}" />
+          <button class="btn" data-action="submit-checklist-report" data-id="${routine.id}">Submit report</button>
+        </div>
+        ${routine.lastInspectedImageUrl ? `<img class="img-preview" src="${routine.lastInspectedImageUrl}" alt="${routine.name}" />` : ''}
+        ${reportRows ? `<div class="stack"><h3 class="small" style="margin:0.25rem 0 0">Recent reports</h3>${reportRows}</div>` : ''}
       </div>
     `;
   }).join('');
@@ -609,11 +665,11 @@ function renderRoutines() {
     <div class="grid">
       ${canManage ? `
         <section class="card">
-          <h2 style="margin-top:0">Routine inspections</h2>
+          <h2 style="margin-top:0">Create checklist</h2>
           <form data-form="routine-form" class="stack">
             <div class="form-grid">
               <label>
-                Routine name
+                Checklist name
                 <input name="name" required />
               </label>
               <label>
@@ -621,13 +677,25 @@ function renderRoutines() {
                 <input name="frequencyDays" type="number" min="1" value="7" required />
               </label>
             </div>
-            <button class="btn" type="submit">Create routine</button>
+            <label>
+              Description
+              <input name="description" placeholder="Short summary" />
+            </label>
+            <label>
+              Detail / instructions
+              <textarea name="detail" placeholder="Longer instructions for whoever completes this checklist"></textarea>
+            </label>
+            <label>
+              Sub-tasks (one per line)
+              <textarea name="subtasks" placeholder="Check fridge temperature&#10;Wipe down counters"></textarea>
+            </label>
+            <button class="btn" type="submit">Create checklist</button>
           </form>
         </section>
       ` : ''}
       <section class="card">
-        <h2 style="margin-top:0">Active routines</h2>
-        <div class="list">${rows || '<p class="muted">No routines yet.</p>'}</div>
+        <h2 style="margin-top:0">Checklists</h2>
+        <div class="list">${rows || '<p class="muted">No checklists yet.</p>'}</div>
       </section>
     </div>
   `;
@@ -638,7 +706,7 @@ function renderAdmin() {
     <div class="list-item">
       <div>
         <strong>${person.name}</strong>
-        <div class="muted">${person.role}${person.employmentType ? ` · ${person.employmentType}` : ''}</div>
+        <div class="muted">${person.role}${person.employmentType ? ` · ${person.employmentType} · ${formatCurrency(person.dailyRate)}/day` : ''}</div>
       </div>
       ${person.role !== 'App Owner' ? `<button class="btn danger" data-action="delete-staff" data-id="${person.id}">Remove access</button>` : ''}
     </div>
@@ -673,8 +741,8 @@ function renderAdmin() {
               </select>
             </label>
             <label>
-              Fixed monthly salary (full-time only)
-              <input name="salary" type="number" value="0" />
+              Daily rate (฿, staff only)
+              <input name="dailyRate" type="number" min="0" value="0" />
             </label>
             <label>
               Login PIN
@@ -687,6 +755,98 @@ function renderAdmin() {
       <section class="card">
         <h2 style="margin-top:0">Roles</h2>
         <div class="list">${rows}</div>
+      </section>
+    </div>
+  `;
+}
+
+// Days up to and including today use the actual attendance record's pay (or
+// 0 if the employee wasn't marked present); days after today assume on-time
+// attendance at the employee's day rate, since the app has no concept of a
+// fixed weekly schedule to know which future days someone is actually rostered.
+function computeExpectedSalary(employee, monthValue) {
+  const [year, month] = monthValue.split('-').map(Number);
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const today = todayISO();
+  let total = 0;
+  let actualDays = 0;
+  let projectedDays = 0;
+  for (let day = 1; day <= daysInMonth; day++) {
+    const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    if (dateStr <= today) {
+      const record = getAttendanceForDate(employee.id, dateStr);
+      if (record && record.pay !== null) {
+        total += Number(record.pay);
+        actualDays++;
+      }
+    } else {
+      total += calculateDailyPay(employee.dailyRate, 0, isHolidayDate(dateStr));
+      projectedDays++;
+    }
+  }
+  return { total, actualDays, projectedDays };
+}
+
+function renderFinancial() {
+  const paidStaff = state.staff.filter((person) => person.employmentType);
+  const salaries = paidStaff.map((employee) => ({ employee, ...computeExpectedSalary(employee, state.financialMonth) }));
+  const grandTotal = salaries.reduce((sum, entry) => sum + entry.total, 0);
+
+  const rows = salaries.map(({ employee, total, actualDays, projectedDays }) => `
+    <div class="list-item">
+      <div>
+        <strong>${employee.name}</strong>
+        <div class="muted">${employee.employmentType} · ${formatCurrency(employee.dailyRate)}/day</div>
+        <div class="small">${actualDays} actual day(s), ${projectedDays} projected day(s)</div>
+      </div>
+      <strong>${formatCurrency(total)}</strong>
+    </div>
+  `).join('');
+
+  const holidayRows = state.holidays.map((holiday) => `
+    <div class="list-item">
+      <div>
+        <strong>${formatDate(holiday.date)}</strong>
+        ${holiday.name ? `<div class="muted">${holiday.name}</div>` : ''}
+      </div>
+      <button class="btn danger" data-action="delete-holiday" data-id="${holiday.id}">Remove</button>
+    </div>
+  `).join('');
+
+  return `
+    <div class="grid">
+      <section class="card">
+        <div class="row" style="justify-content:space-between">
+          <h2 style="margin:0">Financial — expected salary</h2>
+          <span class="badge">Total ${formatCurrency(grandTotal)}</span>
+        </div>
+        <form data-form="financial-period-form" class="row" style="margin-top:0.8rem">
+          <label style="min-width:220px">
+            Month
+            <input type="month" name="month" value="${state.financialMonth}" />
+          </label>
+          <button class="btn" type="submit">View</button>
+        </form>
+        <p class="muted small" style="margin-top:0.5rem">Days up to today use actual attendance and lateness; remaining days in the month assume on-time attendance at the daily rate.</p>
+      </section>
+      <section class="card">
+        <h2 style="margin-top:0">Expected salary by employee</h2>
+        <div class="list">${rows || '<p class="muted">No paid staff yet.</p>'}</div>
+      </section>
+      <section class="card">
+        <h2 style="margin-top:0">Public holidays (1.5x pay)</h2>
+        <form data-form="holiday-form" class="row">
+          <label style="min-width:180px">
+            Date
+            <input type="date" name="date" required />
+          </label>
+          <label style="min-width:180px">
+            Name
+            <input name="name" placeholder="e.g. Songkran" />
+          </label>
+          <button class="btn secondary" type="submit">Add holiday</button>
+        </form>
+        <div class="list" style="margin-top:0.8rem">${holidayRows || '<p class="muted">No holidays added yet.</p>'}</div>
       </section>
     </div>
   `;
@@ -732,7 +892,7 @@ async function createStaffMember(formData) {
   const name = formData.get('name');
   const role = formData.get('role');
   const employmentType = formData.get('employmentType') || '';
-  const salary = employmentType === 'full-time' ? Number(formData.get('salary') || 0) : null;
+  const dailyRate = employmentType ? Number(formData.get('dailyRate') || 0) : null;
   const pin = formData.get('pin');
   const uid = await DB.createStaffAuthAccount(name, pin);
   const record = {
@@ -740,7 +900,7 @@ async function createStaffMember(formData) {
     name,
     role,
     employmentType,
-    salary,
+    dailyRate,
     active: true,
     createdAt: nowISO()
   };
@@ -789,9 +949,17 @@ async function handleForm(name, formData) {
 
   if (name === 'routine-form') {
     if (!roleAtLeast('Manager')) return;
+    const subtasks = (formData.get('subtasks') || '')
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((text) => ({ id: DB.uid('task'), text }));
     const routine = {
       id: DB.uid('routine'),
       name: formData.get('name'),
+      description: formData.get('description') || '',
+      detail: formData.get('detail') || '',
+      subtasks,
       frequencyDays: Number(formData.get('frequencyDays') || 7),
       lastInspectedAt: nowISO(),
       lastInspectedImageUrl: '',
@@ -799,7 +967,28 @@ async function handleForm(name, formData) {
     };
     await DB.put('routines', routine);
     upsertLocal('routines', routine);
-    await pushNotification('Routine created', `${routine.name} will be inspected every ${routine.frequencyDays} day(s).`);
+    await pushNotification('Checklist created', `${routine.name} will repeat every ${routine.frequencyDays} day(s).`);
+    render();
+    return;
+  }
+
+  if (name === 'financial-period-form') {
+    if (!roleAtLeast('Admin')) return;
+    state.financialMonth = formData.get('month') || monthISO();
+    render();
+    return;
+  }
+
+  if (name === 'holiday-form') {
+    if (!roleAtLeast('Admin')) return;
+    const holiday = {
+      id: DB.uid('holiday'),
+      date: formData.get('date'),
+      name: formData.get('name') || '',
+      createdAt: nowISO()
+    };
+    await DB.put('holidays', holiday);
+    upsertLocal('holidays', holiday);
     render();
     return;
   }
@@ -837,7 +1026,8 @@ async function handleAction(action, data) {
     const roundedArrival = roundUpToHalfHour(rawArrival);
     const lateMinutes = Math.max(0, toMinutes(roundedArrival) - toMinutes(schedule.start));
     const workedHours = Math.max(0, (toMinutes(schedule.end) - toMinutes(roundedArrival)) / 60 - 1);
-    const pay = employee.employmentType === 'part-time' ? calculatePartTimePay(workedHours, lateMinutes) : null;
+    const isHoliday = isHolidayDate(state.currentDate);
+    const pay = calculateDailyPay(employee.dailyRate, lateMinutes, isHoliday);
     const record = {
       id: attendanceId(employee.id, state.currentDate),
       staffId: employee.id,
@@ -847,6 +1037,7 @@ async function handleAction(action, data) {
       lateMinutes,
       workedHours,
       pay,
+      isHoliday,
       createdAt: nowISO()
     };
     await DB.put('attendance', record);
@@ -943,27 +1134,47 @@ async function handleAction(action, data) {
     return;
   }
 
-  if (action === 'inspect-routine') {
+  if (action === 'submit-checklist-report') {
     const routine = state.routines.find((entry) => entry.id === data.id);
     if (!routine) return;
     const imageInput = document.querySelector(`[data-routine-image-for="${data.id}"]`);
     const file = imageInput?.files?.[0];
-    if (!file) return;
-    const imageUrl = await fileToCompressedDataUrl(file);
-    const updatedRoutine = { ...routine, lastInspectedAt: nowISO(), lastInspectedImageUrl: imageUrl };
+    const newImageUrl = file ? await fileToCompressedDataUrl(file) : '';
+    const notesInput = document.querySelector(`[data-checklist-notes="${data.id}"]`);
+    const notes = notesInput?.value.trim() || '';
+    const subtaskResults = (routine.subtasks || []).map((task) => {
+      const checkbox = document.querySelector(`[data-checklist-task="${data.id}"][data-task-id="${task.id}"]`);
+      return { id: task.id, text: task.text, done: !!checkbox?.checked };
+    });
+    const updatedRoutine = {
+      ...routine,
+      lastInspectedAt: nowISO(),
+      lastInspectedImageUrl: newImageUrl || routine.lastInspectedImageUrl || ''
+    };
     await DB.put('routines', updatedRoutine);
     upsertLocal('routines', updatedRoutine);
-    const log = {
-      id: DB.uid('insp'),
+    const report = {
+      id: DB.uid('report'),
       routineId: routine.id,
       staffId: state.currentUser?.uid || '',
-      imageUrl,
+      imageUrl: newImageUrl,
+      notes,
+      subtaskResults,
       inspectedAt: nowISO()
     };
-    await DB.put('routineInspections', log);
-    upsertLocal('routineInspections', log);
-    await pushNotification('Inspection uploaded', `${routine.name} was inspected successfully.`);
+    await DB.put('routineInspections', report);
+    upsertLocal('routineInspections', report);
+    await pushNotification('Checklist report submitted', `${routine.name} was completed successfully.`);
     render();
+    return;
+  }
+
+  if (action === 'delete-holiday') {
+    if (!roleAtLeast('Admin')) return;
+    await DB.del('holidays', data.id);
+    removeLocal('holidays', data.id);
+    render();
+    return;
   }
 }
 
