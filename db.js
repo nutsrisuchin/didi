@@ -14,13 +14,21 @@ const EMAIL_DOMAIN = 'didi-malatang.local';
 const OWNER_EMAIL = `owner@${EMAIL_DOMAIN}`;
 
 function slugify(name) {
-  return (
-    String(name)
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/(^-|-$)/g, '') || 'user'
-  );
+  const ascii = String(name)
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/(^-|-$)/g, '');
+  if (ascii) return ascii;
+  // Names with no ASCII letters/digits at all (e.g. Thai-only names) used to
+  // all fall back to the same literal 'user' slug, so the second Thai-named
+  // account ever created would collide with the first on the same login
+  // email and fail outright — permanently, once the first is deleted, since
+  // removing a staff doc doesn't delete the orphaned Auth login (see
+  // CLAUDE.md). Encode every character's code point instead so distinct
+  // names always produce distinct, but still deterministic, ASCII slugs.
+  const codePoints = Array.from(String(name).trim()).map((ch) => ch.codePointAt(0).toString(36));
+  return codePoints.length ? `u-${codePoints.join('')}` : 'user';
 }
 
 function emailForName(name) {

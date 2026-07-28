@@ -430,6 +430,14 @@ function renderHome() {
   `;
 }
 
+// Default assumption: everyone works their normal schedule every day unless
+// a manager explicitly marks a day off (record.dayOff === true). A record
+// with real clockIn/clockOut (from the quick daily mark, or the "exact time"
+// override below) represents an actual logged day and always wins. No
+// record at all is NOT treated as absent — it's the implicit "working as
+// scheduled, on time" default, since requiring a manager to fill in two time
+// fields for every single normal working day was the actual complaint this
+// redesign responds to.
 function renderMonthlySchedule(staffList) {
   const dates = datesInMonth(state.timesheetMonth);
   const headerCells = staffList.map((employee) => `<th>${employee.name}</th>`).join('');
@@ -437,16 +445,18 @@ function renderMonthlySchedule(staffList) {
   const bodyRows = dates.map((dateStr) => {
     const dayOfWeek = THAI_WEEKDAY_SHORT[new Date(dateStr).getDay()];
     const dayNum = Number(dateStr.slice(8, 10));
+    const schedule = scheduleFor(dateStr);
     const cells = staffList.map((employee) => {
       const record = getAttendanceForDate(employee.id, dateStr);
+      const dayOff = record?.dayOff === true;
       const selected = state.selectedScheduleCell
         && state.selectedScheduleCell.staffId === employee.id
         && state.selectedScheduleCell.date === dateStr;
       const classes = ['schedule-cell'];
-      if (!record) classes.push('off');
-      if (record && record.lateMinutes > 0) classes.push('late');
+      if (dayOff) classes.push('off');
+      if (record && !dayOff && record.lateMinutes > 0) classes.push('late');
       if (selected) classes.push('selected');
-      const label = record ? `${record.clockIn}-${record.clockOut}` : 'หยุด';
+      const label = dayOff ? 'หยุด' : record ? `${record.clockIn}-${record.clockOut}` : `${schedule.start}-${schedule.end}`;
       return `<td><button type="button" class="${classes.join(' ')}" data-action="select-schedule-cell" data-staff-id="${employee.id}" data-date="${dateStr}">${label}</button></td>`;
     }).join('');
     return `<tr><td class="schedule-daylabel">${dayOfWeek} ${dayNum}</td>${cells}</tr>`;
@@ -463,14 +473,23 @@ function renderMonthlySchedule(staffList) {
 function renderScheduleSummary(staffList) {
   const dates = datesInMonth(state.timesheetMonth);
   const rows = staffList.map((employee) => {
-    const records = dates.map((dateStr) => getAttendanceForDate(employee.id, dateStr)).filter(Boolean);
-    const worked = records.length;
-    const late = records.filter((entry) => entry.lateMinutes > 0).length;
+    let worked = 0;
+    let off = 0;
+    let late = 0;
+    dates.forEach((dateStr) => {
+      const record = getAttendanceForDate(employee.id, dateStr);
+      if (record?.dayOff) {
+        off++;
+      } else {
+        worked++;
+        if (record && record.lateMinutes > 0) late++;
+      }
+    });
     return `
       <tr>
         <td>${employee.name}</td>
         <td>${worked}</td>
-        <td>${dates.length - worked}</td>
+        <td>${off}</td>
         <td>${late}</td>
       </tr>
     `;
@@ -490,25 +509,34 @@ function renderScheduleEditor(staffList) {
   const employee = staffList.find((entry) => entry.id === staffId);
   if (!employee) return '';
   const record = getAttendanceForDate(staffId, date);
+  const dayOff = record?.dayOff === true;
   const schedule = scheduleFor(date);
   return `
     <div class="card" style="box-shadow:none; border:1px solid var(--color-border-soft); margin-top:0.8rem;">
-      <h3 style="margin:0 0 0.5rem">แก้ไขเวลา: ${employee.name} · ${formatDate(date)}</h3>
-      <div class="form-grid">
-        <label>
-          เวลาเข้างาน
-          <input type="time" id="schedule-on-input" value="${record?.clockIn || schedule.start}" />
-        </label>
-        <label>
-          เวลาเลิกงาน
-          <input type="time" id="schedule-off-input" value="${record?.clockOut || schedule.end}" />
-        </label>
+      <h3 style="margin:0 0 0.5rem">${employee.name} · ${formatDate(date)}</h3>
+      <p class="muted small">ค่าเริ่มต้นคือมาทำงานตามปกติ (${schedule.start}-${schedule.end}) ไม่ต้องทำอะไรเพิ่ม เว้นแต่วันนี้เป็นวันหยุด</p>
+      <div class="row">
+        ${dayOff
+          ? `<button class="btn" data-action="clear-schedule-cell">ยกเลิกวันหยุด (กลับมาทำงานตามปกติ)</button>`
+          : `<button class="btn danger" data-action="mark-schedule-dayoff">ทำเครื่องหมายวันหยุด</button>`}
+        <button class="btn secondary" data-action="close-schedule-cell">ปิด</button>
       </div>
-      <div class="row" style="margin-top:0.6rem">
-        <button class="btn" data-action="save-schedule-cell">บันทึก</button>
-        <button class="btn secondary" data-action="clear-schedule-cell">ทำเครื่องหมายวันหยุด</button>
-        <button class="btn secondary" data-action="close-schedule-cell">ยกเลิก</button>
-      </div>
+      ${dayOff ? '' : `
+        <details style="margin-top:0.6rem">
+          <summary class="small muted" style="cursor:pointer;">หรือระบุเวลาเข้า-ออกงานที่แน่นอน (เช่น มาสาย/ออกก่อน)</summary>
+          <div class="form-grid" style="margin-top:0.5rem">
+            <label>
+              เวลาเข้างาน
+              <input type="time" id="schedule-on-input" value="${record?.clockIn || schedule.start}" />
+            </label>
+            <label>
+              เวลาเลิกงาน
+              <input type="time" id="schedule-off-input" value="${record?.clockOut || schedule.end}" />
+            </label>
+          </div>
+          <button class="btn secondary" data-action="save-schedule-cell" style="margin-top:0.5rem">บันทึกเวลาที่แน่นอน</button>
+        </details>
+      `}
     </div>
   `;
 }
@@ -531,9 +559,11 @@ function renderTimesheet() {
         <div>
           <strong>${employee.name}</strong>
           <div class="muted">${employmentTypeLabel(employee.employmentType)} · ${roleLabel(employee.role)}${showSalary ? ` · ${formatCurrency(employee.dailyRate)}/วัน` : ''}</div>
-          ${entry
-            ? `<div class="small">เข้างาน ${entry.clockIn} · เลิกงาน ${entry.clockOut} · ทำงาน ${entry.workedHours} ชม. · มาสาย ${entry.lateMinutes} นาที${entry.pay !== null && showSalary ? ` · ค่าจ้าง ${formatCurrency(entry.pay)}` : ''}${entry.isHoliday ? ' · <span class="badge">วันหยุดนักขัตฤกษ์ x1.5</span>' : ''}</div>`
-            : '<div class="small">ยังไม่ได้ลงเวลาวันนี้</div>'}
+          ${entry?.dayOff
+            ? '<div class="small"><span class="badge overdue">วันหยุด</span></div>'
+            : entry
+              ? `<div class="small">เข้างาน ${entry.clockIn} · เลิกงาน ${entry.clockOut} · ทำงาน ${entry.workedHours} ชม. · มาสาย ${entry.lateMinutes} นาที${entry.pay !== null && showSalary ? ` · ค่าจ้าง ${formatCurrency(entry.pay)}` : ''}${entry.isHoliday ? ' · <span class="badge">วันหยุดนักขัตฤกษ์ x1.5</span>' : ''}</div>`
+              : `<div class="small">ยังไม่ได้ลงเวลาวันนี้ (ค่าเริ่มต้น: มาทำงานตามปกติ ${schedule.start}-${schedule.end})</div>`}
         </div>
         ${canManage ? `
           <div class="row">
@@ -979,30 +1009,27 @@ function renderAdmin() {
 // 0 if the employee wasn't marked present); days after today assume on-time
 // attendance at the employee's day rate, since the app has no concept of a
 // fixed weekly schedule to know which future days someone is actually rostered.
+// Default assumption (agreed with the user): everyone works their normal
+// schedule every day of the month unless a manager explicitly marked that
+// day off via the schedule grid — a day with no record at all is NOT
+// treated as unpaid absence, past or future, it's assumed worked on-time.
 function computeExpectedSalary(employee, monthValue) {
-  const today = todayISO();
   let total = 0;
-  let actualDays = 0;
-  let projectedDays = 0;
+  let workedDays = 0;
+  let offDays = 0;
   datesInMonth(monthValue).forEach((dateStr) => {
     const record = getAttendanceForDate(employee.id, dateStr);
-    if (record) {
-      // Covers both actual clock-ins and any day a manager has already
-      // planned ahead via the monthly schedule grid — a real record always
-      // wins over the on-time assumption below, past or future.
-      if (record.pay !== null) {
-        total += Number(record.pay);
-        actualDays++;
-      }
-    } else if (dateStr <= today) {
-      // No record and the day has already passed: nothing to project, so
-      // it contributes 0 — matches "no record = not worked that day".
+    if (record?.dayOff) {
+      offDays++;
+    } else if (record) {
+      total += Number(record.pay || 0);
+      workedDays++;
     } else {
       total += calculateDailyPay(employee.dailyRate, 0, isHolidayDate(dateStr));
-      projectedDays++;
+      workedDays++;
     }
   });
-  return { total, actualDays, projectedDays };
+  return { total, workedDays, offDays };
 }
 
 function renderFinancial() {
@@ -1010,13 +1037,13 @@ function renderFinancial() {
   const salaries = paidStaff.map((employee) => ({ employee, ...computeExpectedSalary(employee, state.financialMonth) }));
   const grandTotal = salaries.reduce((sum, entry) => sum + entry.total, 0);
 
-  const rows = salaries.map(({ employee, total, actualDays, projectedDays }) => `
+  const rows = salaries.map(({ employee, total, workedDays, offDays }) => `
     <div class="list-item" style="flex-direction:column; align-items:stretch; gap:0.5rem;">
       <div class="row" style="justify-content:space-between">
         <div>
           <strong>${employee.name}</strong>
           <div class="muted">${employmentTypeLabel(employee.employmentType)} · ${roleLabel(employee.role)}</div>
-          <div class="small">${actualDays} วันจริง, ${projectedDays} วันคาดการณ์</div>
+          <div class="small">${workedDays} วันทำงาน, ${offDays} วันหยุด</div>
         </div>
         <strong>${formatCurrency(total)}</strong>
       </div>
@@ -1052,7 +1079,7 @@ function renderFinancial() {
           </label>
           <button class="btn" type="submit">ดูข้อมูล</button>
         </form>
-        <p class="muted small" style="margin-top:0.5rem">วันที่ผ่านมาแล้วจนถึงวันนี้ใช้ข้อมูลการลงเวลาและความล่าช้าจริง ส่วนวันที่เหลือในเดือนจะคำนวณโดยสมมติว่ามาตรงเวลาตามค่าจ้างต่อวัน</p>
+        <p class="muted small" style="margin-top:0.5rem">ระบบสมมติว่าพนักงานมาทำงานตามปกติทุกวัน ยกเว้นวันที่ผู้จัดการทำเครื่องหมายว่าเป็นวันหยุดในตารางเวลา หากมีการลงเวลาจริง (เช่น มาสาย) ระบบจะใช้ข้อมูลจริงแทน</p>
       </section>
       <section class="card">
         <h2 style="margin-top:0">เงินเดือนที่คาดการณ์ต่อพนักงาน</h2>
@@ -1272,6 +1299,7 @@ async function handleAction(action, data) {
       workedHours,
       pay,
       isHoliday,
+      dayOff: false,
       updatedBy: state.currentUser?.uid || '',
       createdAt: nowISO()
     };
@@ -1330,6 +1358,7 @@ async function handleAction(action, data) {
       workedHours,
       pay,
       isHoliday,
+      dayOff: false,
       updatedBy: state.currentUser?.uid || '',
       createdAt: nowISO()
     };
@@ -1337,6 +1366,34 @@ async function handleAction(action, data) {
     upsertLocal('attendance', record);
     state.selectedScheduleCell = null;
     await pushNotification('อัปเดตตารางเวลา', `${state.currentStaff?.name || ''} ตั้งเวลาเข้า-ออกงานของ ${employee.name} วันที่ ${formatDate(date)} เป็น ${clockIn}-${clockOut}`);
+    render();
+    return;
+  }
+
+  if (action === 'mark-schedule-dayoff') {
+    if (!roleAtLeast('Manager')) return;
+    if (!state.selectedScheduleCell) return;
+    const { staffId, date } = state.selectedScheduleCell;
+    const employee = state.staff.find((entry) => entry.id === staffId);
+    if (!employee) return;
+    const record = {
+      id: attendanceId(staffId, date),
+      staffId,
+      date,
+      dayOff: true,
+      clockIn: null,
+      clockOut: null,
+      lateMinutes: 0,
+      workedHours: 0,
+      pay: 0,
+      isHoliday: false,
+      updatedBy: state.currentUser?.uid || '',
+      createdAt: nowISO()
+    };
+    await DB.put('attendance', record);
+    upsertLocal('attendance', record);
+    state.selectedScheduleCell = null;
+    await pushNotification('อัปเดตตารางเวลา', `${state.currentStaff?.name || ''} ทำเครื่องหมายวันหยุดให้ ${employee.name} วันที่ ${formatDate(date)}`);
     render();
     return;
   }
@@ -1350,7 +1407,7 @@ async function handleAction(action, data) {
     await DB.del('attendance', id);
     removeLocal('attendance', id);
     state.selectedScheduleCell = null;
-    await pushNotification('อัปเดตตารางเวลา', `${state.currentStaff?.name || ''} ทำเครื่องหมายวันหยุดให้ ${employee?.name || ''} วันที่ ${formatDate(date)}`);
+    await pushNotification('อัปเดตตารางเวลา', `${state.currentStaff?.name || ''} ยกเลิกวันหยุดของ ${employee?.name || ''} วันที่ ${formatDate(date)} (กลับมาทำงานตามปกติ)`);
     render();
     return;
   }

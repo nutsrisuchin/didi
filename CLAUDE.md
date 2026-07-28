@@ -80,9 +80,17 @@ Storage, see below). Deployed on GitHub Pages, auto-deploys on push to `main`.
   collection needs per-owner rules, prefer this same "doc ID == auth uid" trick over adding an
   `ownerId` field you'd have to query for.
 - Auth is per-person PIN, not "real" passwords: each staff member is a real Firebase Auth user
-  under a synthetic email derived from their name (`emailForName()` in `db.js`, currently
-  `slugified-name@didi-malatang.local`), with their PIN as the password — a real server-side check
-  via Firestore Security Rules, not just a UI gate.
+  under a synthetic email derived from their name (`emailForName()` → `slugify()` in `db.js`,
+  currently `slugified-name@didi-malatang.local`), with their PIN as the password — a real
+  server-side check via Firestore Security Rules, not just a UI gate. `slugify()` first tries a
+  plain ASCII slug (lowercased, non-alphanumerics collapsed to `-`); **for names with no ASCII
+  letters/digits at all — i.e. any Thai-only name, the normal case for this app — it falls back
+  to encoding every character's Unicode code point** (`u-<codepoints in base36>`) rather than the
+  literal string `'user'`. The old behavior collapsed *every* all-Thai name to the same `'user'`
+  slug/email, so the second Thai-named account ever created would collide with the first and
+  fail to create — permanently, once the first was removed, since removing a `staff` doc doesn't
+  delete the orphaned Auth login (see below). Don't reintroduce a fallback that isn't unique per
+  distinct name.
 - **Creating a new staff login without signing out the admin doing the creating**
   (`DB.createStaffAuthAccount` in `db.js`) uses a throwaway *secondary* Firebase App instance
   (`firebase.initializeApp(config, uniqueName)`), calls `createUserWithEmailAndPassword` on
@@ -145,20 +153,38 @@ changing permissions: `render()`'s nav gating, each `handleAction`/`handleForm` 
 - Schedule: fixed `09:30–20:30` for every day of the week, no weekday/weekend split (11h span,
   1h unpaid lunch → 10 worked hours baseline). `scheduleFor(date)` in `app.js` — takes a date
   argument for call-site compatibility but the same schedule now applies regardless of the date.
-- Two ways to write an `attendance` record, both producing the same doc shape:
+- **Default assumption: every employee works their normal schedule every day of the month,
+  past or future, unless a manager explicitly marks that specific day off.** No `attendance`
+  record for a given (staff, date) is *not* treated as an unpaid absence — it's the implicit
+  "worked, on time" default. This was a deliberate reversal of an earlier version of this app
+  (where "no record" meant unpaid/absent for already-elapsed days) after the user found having
+  to manually confirm every single normal working day made the monthly schedule grid impractical
+  to use. `getAttendanceForDate()` itself is unchanged (still just looks up whatever doc
+  exists-or-doesn't); the "assume working" behavior lives in the callers that interpret the
+  result — `computeExpectedSalary()`, `renderMonthlySchedule()`, `renderScheduleSummary()` — not
+  in the data layer itself.
+- Three ways an `attendance` record gets written, all producing the same doc shape:
   - **Quick daily mark** (Timesheet's top "ภาพรวมการลงเวลา" section, `mark-attendance` action):
     clock-in is rounded up to the next half hour via `roundUpToHalfHour()` — e.g. `10:10→10:30`,
     `10:35→11:00` — and clock-out is always the fixed schedule end. This is for tapping "mark
     present" in the moment someone actually arrives.
-  - **Monthly schedule grid** (further down the same page, `save-schedule-cell` action): both
-    clock-in and clock-out are taken from the two time inputs *exactly as typed, with no
-    rounding* — a manager consciously planning or correcting a specific day should be able to
-    enter the precise time, not have it silently rounded.
+  - **Monthly schedule grid, exact-time override** (`save-schedule-cell` action, behind a
+    collapsed `<details>` disclosure so it isn't the first thing a manager sees for an ordinary
+    day): both clock-in and clock-out are taken from the two time inputs *exactly as typed, with
+    no rounding* — for correcting a specific day (e.g. someone came in late), not for routine use.
+  - **Monthly schedule grid, day-off marker** (`mark-schedule-dayoff` action — the grid's primary,
+    one-tap action): writes `dayOff: true` with `clockIn`/`clockOut` null and `pay: 0`. Undoing it
+    (`clear-schedule-cell`) simply **deletes** the record, reverting to the implicit "working"
+    default — this is the opposite of what deleting an attendance record used to mean in an
+    earlier version of this app (previously: no record = day off). Every write from any of the
+    three paths explicitly sets `dayOff` (true, or false) rather than leaving it to Firestore's
+    merge semantics, since `DB.put` merges rather than overwrites — otherwise a stale `dayOff:
+    true` from a prior write could silently survive alongside a fresh clock-in/out.
   - `lateMinutes = max(0, clockIn − scheduledStart)`; `workedHours = max(0, (clockOut − clockIn)
-    − 60min)` (quick-mark always uses the fixed schedule end for `clockOut` here; the grid uses
-    whatever end time was entered) — `workedHours` is stored for display only, it does not feed
-    the pay formula (see below), consistent with "no OT."
-  - Every write from either path also stamps `updatedBy` (the acting user's uid) and pushes a
+    − 60min)` (quick-mark always uses the fixed schedule end for `clockOut` here; the grid's
+    exact-time override uses whatever end time was entered) — `workedHours` is stored for display
+    only, it does not feed the pay formula (see below), consistent with "no OT."
+  - Every write from any path also stamps `updatedBy` (the acting user's uid) and pushes a
     notification naming who made the change — see the Notifications section below.
 - **Every employee — full-time and part-time alike — is paid a custom per-person day rate**
   (`staff.dailyRate`, set when the account is created), not a fixed monthly salary and not a
@@ -177,15 +203,11 @@ changing permissions: `render()`'s nav gating, each `handleAction`/`handleForm` 
   *expected salary for a selected calendar month* (`computeExpectedSalary()`), picked via a
   native `<input type="month">` (small built-in calendar icon — **not verified on iOS Safari**,
   which has historically had inconsistent support for `type="month"`; worth testing on a real
-  iPhone before relying on it). For each day of the selected month, `computeExpectedSalary()`
-  checks for a real `attendance` record first — **an existing record always wins**, whether it's
-  a past actual clock-in or a future day a manager already planned via the Timesheet's monthly
-  schedule grid. Only when no record exists does it fall back to a date-based assumption: a
-  past/today date with no record contributes 0 (not marked present that day); a future date with
-  no record assumes on-time full-day attendance via `calculateDailyPay(dailyRate, 0, isHoliday)`.
-  That fallback is a deliberate simplification agreed with the user for days nobody has planned
-  yet — the app has no *mandatory* weekly roster, so absent a real plan it assumes every
-  remaining day is worked. Re-confirm with the user before changing this fallback.
+  iPhone before relying on it). For each day of the selected month: a record with `dayOff: true`
+  contributes 0; any other record (real clock-in/out, from either the quick mark or the grid)
+  contributes its own `pay`; **no record at all still contributes a full on-time day's pay** via
+  `calculateDailyPay(dailyRate, 0, isHoliday)` — see the "default assumption" note above. There is
+  no past/future distinction any more; the same rule applies uniformly to every day of the month.
 - Financial is also where `dailyRate` is edited (`update-employee-rate` action) — a mini-input +
   button per employee row, same convention as the Warehouse quantity editor. Editing pushes a
   notification naming who changed whose rate, same as attendance changes above.
@@ -309,11 +331,13 @@ Storage" note above; images live inline on the docs below as base64 data URLs.
   write here, just with different allowed `role` values (see RBAC section above).
 - **`attendance`** (doc ID = `` `${date}_${staffId}` `` — deterministic, so marking attendance
   twice for the same person/day upserts instead of duplicating): `staffId`, `date`
-  (`YYYY-MM-DD`), `clockIn`, `clockOut`, `lateMinutes`, `workedHours` (display only, doesn't
-  feed pay), `pay` (computed via `calculateDailyPay`, for every employment type now), `isHoliday`
-  (bool, whether `calculateDailyPay` applied the 1.5x multiplier for that date), `updatedBy`
-  (the acting user's Auth uid — set by both the quick daily mark and the monthly schedule grid,
-  see Business logic section above), `createdAt`.
+  (`YYYY-MM-DD`), `dayOff` (bool — see the "default assumption" note above; the absence of a
+  whole record, not this field being `false`, is what signals "no explicit data, assume
+  working"), `clockIn`, `clockOut` (both `null` when `dayOff` is true), `lateMinutes`,
+  `workedHours` (display only, doesn't feed pay), `pay` (computed via `calculateDailyPay`, `0`
+  when `dayOff`), `isHoliday` (bool, whether `calculateDailyPay` applied the 1.5x multiplier for
+  that date), `updatedBy` (the acting user's Auth uid — set by every write path, see Business
+  logic section above), `createdAt`.
 - **`warehouseItems`**: `category` (free text — no fixed category list, same convention as
   `unit`; the Warehouse view groups items into collapsible sections by this field, falling
   back to `'อื่นๆ'` when unset), `name`, `unit` (free text — no fixed unit list), `quantity`
