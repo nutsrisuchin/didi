@@ -15,8 +15,12 @@ const state = {
   holidays: [],
   warehouseLogs: [],
   collapsedStockCategories: new Set(),
-  financialMonth: monthISO()
+  financialMonth: monthISO(),
+  timesheetMonth: monthISO(),
+  selectedScheduleCell: null
 };
+
+const THAI_WEEKDAY_SHORT = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'];
 
 // Firestore values (staff.role, staff.employmentType, routine status) stay in
 // English since they're compared against directly (ROLE_ORDER, firestore.rules
@@ -46,6 +50,16 @@ function todayISO() {
 
 function monthISO() {
   return new Date().toISOString().slice(0, 7);
+}
+
+function datesInMonth(monthValue) {
+  const [year, month] = monthValue.split('-').map(Number);
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const dates = [];
+  for (let day = 1; day <= daysInMonth; day++) {
+    dates.push(`${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`);
+  }
+  return dates;
 }
 
 function nowISO() {
@@ -416,8 +430,95 @@ function renderHome() {
   `;
 }
 
+function renderMonthlySchedule(staffList) {
+  const dates = datesInMonth(state.timesheetMonth);
+  const headerCells = staffList.map((employee) => `<th>${employee.name}</th>`).join('');
+
+  const bodyRows = dates.map((dateStr) => {
+    const dayOfWeek = THAI_WEEKDAY_SHORT[new Date(dateStr).getDay()];
+    const dayNum = Number(dateStr.slice(8, 10));
+    const cells = staffList.map((employee) => {
+      const record = getAttendanceForDate(employee.id, dateStr);
+      const selected = state.selectedScheduleCell
+        && state.selectedScheduleCell.staffId === employee.id
+        && state.selectedScheduleCell.date === dateStr;
+      const classes = ['schedule-cell'];
+      if (!record) classes.push('off');
+      if (record && record.lateMinutes > 0) classes.push('late');
+      if (selected) classes.push('selected');
+      const label = record ? `${record.clockIn}-${record.clockOut}` : 'หยุด';
+      return `<td><button type="button" class="${classes.join(' ')}" data-action="select-schedule-cell" data-staff-id="${employee.id}" data-date="${dateStr}">${label}</button></td>`;
+    }).join('');
+    return `<tr><td class="schedule-daylabel">${dayOfWeek} ${dayNum}</td>${cells}</tr>`;
+  }).join('');
+
+  return `
+    <table class="schedule-table">
+      <thead><tr><th>วัน</th>${headerCells}</tr></thead>
+      <tbody>${bodyRows}</tbody>
+    </table>
+  `;
+}
+
+function renderScheduleSummary(staffList) {
+  const dates = datesInMonth(state.timesheetMonth);
+  const rows = staffList.map((employee) => {
+    const records = dates.map((dateStr) => getAttendanceForDate(employee.id, dateStr)).filter(Boolean);
+    const worked = records.length;
+    const late = records.filter((entry) => entry.lateMinutes > 0).length;
+    return `
+      <tr>
+        <td>${employee.name}</td>
+        <td>${worked}</td>
+        <td>${dates.length - worked}</td>
+        <td>${late}</td>
+      </tr>
+    `;
+  }).join('');
+
+  return `
+    <table class="schedule-summary-table">
+      <thead><tr><th>ชื่อ</th><th>วันที่ทำงาน</th><th>วันหยุด</th><th>มาสาย</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `;
+}
+
+function renderScheduleEditor(staffList) {
+  if (!state.selectedScheduleCell) return '';
+  const { staffId, date } = state.selectedScheduleCell;
+  const employee = staffList.find((entry) => entry.id === staffId);
+  if (!employee) return '';
+  const record = getAttendanceForDate(staffId, date);
+  const schedule = scheduleFor(date);
+  return `
+    <div class="card" style="box-shadow:none; border:1px solid var(--color-border-soft); margin-top:0.8rem;">
+      <h3 style="margin:0 0 0.5rem">แก้ไขเวลา: ${employee.name} · ${formatDate(date)}</h3>
+      <div class="form-grid">
+        <label>
+          เวลาเข้างาน
+          <input type="time" id="schedule-on-input" value="${record?.clockIn || schedule.start}" />
+        </label>
+        <label>
+          เวลาเลิกงาน
+          <input type="time" id="schedule-off-input" value="${record?.clockOut || schedule.end}" />
+        </label>
+      </div>
+      <div class="row" style="margin-top:0.6rem">
+        <button class="btn" data-action="save-schedule-cell">บันทึก</button>
+        <button class="btn secondary" data-action="clear-schedule-cell">ทำเครื่องหมายวันหยุด</button>
+        <button class="btn secondary" data-action="close-schedule-cell">ยกเลิก</button>
+      </div>
+    </div>
+  `;
+}
+
 function renderTimesheet() {
   const canManage = roleAtLeast('Manager');
+  // Managers can schedule/mark attendance for everyone but never see pay
+  // figures, even their own — only Admin+ (or an Employee viewing their own
+  // row) sees dailyRate/pay. See CLAUDE.md's RBAC section.
+  const showSalary = roleAtLeast('Admin') || !canManage;
   const staffList = canManage
     ? state.staff.filter((s) => s.employmentType)
     : state.staff.filter((s) => s.id === state.currentUser?.uid);
@@ -429,9 +530,9 @@ function renderTimesheet() {
       <div class="list-item">
         <div>
           <strong>${employee.name}</strong>
-          <div class="muted">${employmentTypeLabel(employee.employmentType)} · ${roleLabel(employee.role)} · ${formatCurrency(employee.dailyRate)}/วัน</div>
+          <div class="muted">${employmentTypeLabel(employee.employmentType)} · ${roleLabel(employee.role)}${showSalary ? ` · ${formatCurrency(employee.dailyRate)}/วัน` : ''}</div>
           ${entry
-            ? `<div class="small">เข้างาน ${entry.clockIn} · เลิกงาน ${entry.clockOut} · ทำงาน ${entry.workedHours} ชม. · มาสาย ${entry.lateMinutes} นาที${entry.pay !== null ? ` · ค่าจ้าง ${formatCurrency(entry.pay)}` : ''}${entry.isHoliday ? ' · <span class="badge">วันหยุดนักขัตฤกษ์ x1.5</span>' : ''}</div>`
+            ? `<div class="small">เข้างาน ${entry.clockIn} · เลิกงาน ${entry.clockOut} · ทำงาน ${entry.workedHours} ชม. · มาสาย ${entry.lateMinutes} นาที${entry.pay !== null && showSalary ? ` · ค่าจ้าง ${formatCurrency(entry.pay)}` : ''}${entry.isHoliday ? ' · <span class="badge">วันหยุดนักขัตฤกษ์ x1.5</span>' : ''}</div>`
             : '<div class="small">ยังไม่ได้ลงเวลาวันนี้</div>'}
         </div>
         ${canManage ? `
@@ -466,6 +567,23 @@ function renderTimesheet() {
       </section>
       ${canManage ? `
         <section class="card">
+          <h2 style="margin-top:0">ตารางเวลาประจำเดือน</h2>
+          <form data-form="schedule-month-form" class="row">
+            <label style="min-width:220px">
+              เดือน
+              <input type="month" name="month" value="${state.timesheetMonth}" />
+            </label>
+            <button class="btn" type="submit">ดู</button>
+          </form>
+          <p class="muted small" style="margin-top:0.5rem">แตะที่ช่องเพื่อวางแผนหรือแก้ไขเวลาเข้า-ออกงานของแต่ละวัน ช่องสีแดงคือวันหยุด</p>
+          <div style="overflow-x:auto; margin-top:0.8rem;">${renderMonthlySchedule(staffList)}</div>
+          ${renderScheduleEditor(staffList)}
+        </section>
+        <section class="card">
+          <h2 style="margin-top:0">สรุปผลประจำเดือน</h2>
+          <div style="overflow-x:auto;">${renderScheduleSummary(staffList)}</div>
+        </section>
+        <section class="card">
           <h2 style="margin-top:0">เพิ่มพนักงาน</h2>
           <form data-form="employee-form" class="stack">
             <div class="form-grid">
@@ -487,15 +605,18 @@ function renderTimesheet() {
                   <option value="part-time">พาร์ทไทม์</option>
                 </select>
               </label>
-              <label>
-                ค่าจ้างต่อวัน (฿)
-                <input name="dailyRate" type="number" min="0" value="440" required />
-              </label>
+              ${showSalary ? `
+                <label>
+                  ค่าจ้างต่อวัน (฿)
+                  <input name="dailyRate" type="number" min="0" value="440" required />
+                </label>
+              ` : ''}
               <label>
                 รหัส PIN สำหรับเข้าสู่ระบบ
                 <input name="pin" type="password" inputmode="numeric" required />
               </label>
             </div>
+            ${!showSalary ? '<p class="muted small">ผู้จัดการเพิ่มพนักงานได้ แต่แอดมินหรือเจ้าของร้านต้องเป็นผู้ตั้งค่าจ้างต่อวันภายหลังในหน้าการเงิน</p>' : ''}
             <button class="btn" type="submit">เพิ่มพนักงาน</button>
           </form>
         </section>
@@ -621,6 +742,8 @@ function renderWarehouse() {
         <div class="stock-manage">
           <input class="mini-input" type="number" min="0" step="any" value="${item.quantity}" data-quantity-for="${item.id}" />
           <button class="btn secondary" data-action="update-item-quantity" data-id="${item.id}">อัปเดต</button>
+          <input type="file" accept="image/*" capture="environment" data-image-for="${item.id}" />
+          <button class="btn secondary" data-action="update-item-photo" data-id="${item.id}">${item.imageUrl ? 'เปลี่ยนรูป' : 'เพิ่มรูป'}</button>
           <button class="btn danger" data-action="delete-item" data-id="${item.id}">ลบ</button>
         </div>
       ` : ''}
@@ -857,25 +980,28 @@ function renderAdmin() {
 // attendance at the employee's day rate, since the app has no concept of a
 // fixed weekly schedule to know which future days someone is actually rostered.
 function computeExpectedSalary(employee, monthValue) {
-  const [year, month] = monthValue.split('-').map(Number);
-  const daysInMonth = new Date(year, month, 0).getDate();
   const today = todayISO();
   let total = 0;
   let actualDays = 0;
   let projectedDays = 0;
-  for (let day = 1; day <= daysInMonth; day++) {
-    const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-    if (dateStr <= today) {
-      const record = getAttendanceForDate(employee.id, dateStr);
-      if (record && record.pay !== null) {
+  datesInMonth(monthValue).forEach((dateStr) => {
+    const record = getAttendanceForDate(employee.id, dateStr);
+    if (record) {
+      // Covers both actual clock-ins and any day a manager has already
+      // planned ahead via the monthly schedule grid — a real record always
+      // wins over the on-time assumption below, past or future.
+      if (record.pay !== null) {
         total += Number(record.pay);
         actualDays++;
       }
+    } else if (dateStr <= today) {
+      // No record and the day has already passed: nothing to project, so
+      // it contributes 0 — matches "no record = not worked that day".
     } else {
       total += calculateDailyPay(employee.dailyRate, 0, isHolidayDate(dateStr));
       projectedDays++;
     }
-  }
+  });
   return { total, actualDays, projectedDays };
 }
 
@@ -885,13 +1011,20 @@ function renderFinancial() {
   const grandTotal = salaries.reduce((sum, entry) => sum + entry.total, 0);
 
   const rows = salaries.map(({ employee, total, actualDays, projectedDays }) => `
-    <div class="list-item">
-      <div>
-        <strong>${employee.name}</strong>
-        <div class="muted">${employmentTypeLabel(employee.employmentType)} · ${formatCurrency(employee.dailyRate)}/วัน</div>
-        <div class="small">${actualDays} วันจริง, ${projectedDays} วันคาดการณ์</div>
+    <div class="list-item" style="flex-direction:column; align-items:stretch; gap:0.5rem;">
+      <div class="row" style="justify-content:space-between">
+        <div>
+          <strong>${employee.name}</strong>
+          <div class="muted">${employmentTypeLabel(employee.employmentType)} · ${roleLabel(employee.role)}</div>
+          <div class="small">${actualDays} วันจริง, ${projectedDays} วันคาดการณ์</div>
+        </div>
+        <strong>${formatCurrency(total)}</strong>
       </div>
-      <strong>${formatCurrency(total)}</strong>
+      <div class="row">
+        <input class="mini-input" type="number" min="0" value="${employee.dailyRate ?? 0}" data-rate-for="${employee.id}" />
+        <span class="muted small">฿/วัน</span>
+        <button class="btn secondary" data-action="update-employee-rate" data-id="${employee.id}">อัปเดตค่าจ้าง</button>
+      </div>
     </div>
   `).join('');
 
@@ -1092,6 +1225,12 @@ async function handleForm(name, formData) {
     state.currentDate = formData.get('date') || todayISO();
     render();
   }
+
+  if (name === 'schedule-month-form') {
+    if (!roleAtLeast('Manager')) return;
+    state.timesheetMonth = formData.get('month') || monthISO();
+    render();
+  }
 }
 
 async function handleAction(action, data) {
@@ -1133,20 +1272,85 @@ async function handleAction(action, data) {
       workedHours,
       pay,
       isHoliday,
+      updatedBy: state.currentUser?.uid || '',
       createdAt: nowISO()
     };
     await DB.put('attendance', record);
     upsertLocal('attendance', record);
-    await pushNotification('บันทึกเวลาทำงานแล้ว', `${employee.name} ลงเวลาทำงานสำหรับวันที่ ${formatDate(state.currentDate)}`);
+    await pushNotification('บันทึกเวลาทำงานแล้ว', `${state.currentStaff?.name || ''} บันทึกเวลาทำงานของ ${employee.name} วันที่ ${formatDate(state.currentDate)}`);
     render();
     return;
   }
 
   if (action === 'clear-attendance') {
     if (!roleAtLeast('Manager')) return;
+    const employee = state.staff.find((entry) => entry.id === data.id);
     const id = attendanceId(data.id, state.currentDate);
     await DB.del('attendance', id);
     removeLocal('attendance', id);
+    await pushNotification('ล้างข้อมูลเวลาทำงาน', `${state.currentStaff?.name || ''} ล้างข้อมูลเวลาทำงานของ ${employee?.name || ''} วันที่ ${formatDate(state.currentDate)}`);
+    render();
+    return;
+  }
+
+  if (action === 'select-schedule-cell') {
+    if (!roleAtLeast('Manager')) return;
+    state.selectedScheduleCell = { staffId: data.staffId, date: data.date };
+    render();
+    return;
+  }
+
+  if (action === 'close-schedule-cell') {
+    state.selectedScheduleCell = null;
+    render();
+    return;
+  }
+
+  if (action === 'save-schedule-cell') {
+    if (!roleAtLeast('Manager')) return;
+    if (!state.selectedScheduleCell) return;
+    const { staffId, date } = state.selectedScheduleCell;
+    const employee = state.staff.find((entry) => entry.id === staffId);
+    if (!employee) return;
+    const clockIn = document.querySelector('#schedule-on-input')?.value;
+    const clockOut = document.querySelector('#schedule-off-input')?.value;
+    if (!clockIn || !clockOut) return;
+    const schedule = scheduleFor(date);
+    const lateMinutes = Math.max(0, toMinutes(clockIn) - toMinutes(schedule.start));
+    const workedHours = Math.max(0, (toMinutes(clockOut) - toMinutes(clockIn)) / 60 - 1);
+    const isHoliday = isHolidayDate(date);
+    const pay = calculateDailyPay(employee.dailyRate, lateMinutes, isHoliday);
+    const record = {
+      id: attendanceId(employee.id, date),
+      staffId: employee.id,
+      date,
+      clockIn,
+      clockOut,
+      lateMinutes,
+      workedHours,
+      pay,
+      isHoliday,
+      updatedBy: state.currentUser?.uid || '',
+      createdAt: nowISO()
+    };
+    await DB.put('attendance', record);
+    upsertLocal('attendance', record);
+    state.selectedScheduleCell = null;
+    await pushNotification('อัปเดตตารางเวลา', `${state.currentStaff?.name || ''} ตั้งเวลาเข้า-ออกงานของ ${employee.name} วันที่ ${formatDate(date)} เป็น ${clockIn}-${clockOut}`);
+    render();
+    return;
+  }
+
+  if (action === 'clear-schedule-cell') {
+    if (!roleAtLeast('Manager')) return;
+    if (!state.selectedScheduleCell) return;
+    const { staffId, date } = state.selectedScheduleCell;
+    const employee = state.staff.find((entry) => entry.id === staffId);
+    const id = attendanceId(staffId, date);
+    await DB.del('attendance', id);
+    removeLocal('attendance', id);
+    state.selectedScheduleCell = null;
+    await pushNotification('อัปเดตตารางเวลา', `${state.currentStaff?.name || ''} ทำเครื่องหมายวันหยุดให้ ${employee?.name || ''} วันที่ ${formatDate(date)}`);
     render();
     return;
   }
@@ -1189,6 +1393,21 @@ async function handleAction(action, data) {
     const log = { id: DB.uid('wlog'), itemId: item.id, quantity, recordedAt: nowISO() };
     await DB.put('warehouseLogs', log);
     upsertLocal('warehouseLogs', log);
+    render();
+    return;
+  }
+
+  if (action === 'update-item-photo') {
+    if (!roleAtLeast('Manager')) return;
+    const item = state.warehouseItems.find((entry) => entry.id === data.id);
+    if (!item) return;
+    const imageInput = document.querySelector(`[data-image-for="${data.id}"]`);
+    const file = imageInput?.files?.[0];
+    if (!file) return;
+    const imageUrl = await fileToCompressedDataUrl(file);
+    const record = { ...item, imageUrl };
+    await DB.put('warehouseItems', record);
+    upsertLocal('warehouseItems', record);
     render();
     return;
   }
@@ -1274,6 +1493,20 @@ async function handleAction(action, data) {
     if (!roleAtLeast('Admin')) return;
     await DB.del('holidays', data.id);
     removeLocal('holidays', data.id);
+    render();
+    return;
+  }
+
+  if (action === 'update-employee-rate') {
+    if (!roleAtLeast('Admin')) return;
+    const employee = state.staff.find((entry) => entry.id === data.id);
+    if (!employee) return;
+    const input = document.querySelector(`[data-rate-for="${data.id}"]`);
+    const dailyRate = Math.max(0, Number(input?.value ?? employee.dailyRate ?? 0));
+    const record = { ...employee, dailyRate };
+    await DB.put('staff', record);
+    upsertLocal('staff', record);
+    await pushNotification('อัปเดตค่าจ้าง', `${state.currentStaff?.name || ''} ปรับค่าจ้างต่อวันของ ${employee.name} เป็น ${formatCurrency(dailyRate)}`);
     render();
     return;
   }

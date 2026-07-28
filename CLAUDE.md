@@ -115,32 +115,51 @@ changing permissions: `render()`'s nav gating, each `handleAction`/`handleForm` 
   it server-side too).
 - **Admin**: manage `staff` (any role except can't touch the App Owner), timesheet, warehouse,
   checklist, notifications, and the **Financial section** (`/financial` view, `data-role-min="Admin"`
-  on its nav button plus an explicit `render()` gate — see Business logic section below).
-  Managers cannot see or reach Financial at all, by design (payroll numbers).
+  on its nav button plus an explicit `render()` gate — see Business logic section below), which
+  is also where **salary/`dailyRate` is viewed and edited** — Admin+ only, deliberately narrower
+  than the rest of `staff` management Admin otherwise has.
 - **Manager**: add/remove `Employee`-role staff (from the Timesheet page's own "Remove
   employee" button, not the Admin page — Managers can't reach `/admin` or `/financial` at all),
-  mark attendance, manage warehouse items, create/manage checklists. Cannot touch
-  Manager/Admin/Owner accounts.
+  mark attendance, plan the monthly schedule grid (see Business logic section below), manage
+  warehouse items, create/manage checklists. Cannot touch Manager/Admin/Owner accounts, and
+  **cannot see `dailyRate` or any computed `pay` figure anywhere in the app, not even their own**
+  — `renderTimesheet`'s `showSalary = roleAtLeast('Admin') || !canManage` flag hides both from
+  the Manager view specifically while still showing it to Admin/Owner and to an Employee viewing
+  their own row. The "Add employee" form correspondingly drops its `dailyRate` field entirely
+  when the viewer isn't Admin+ (new hires get `dailyRate: 0` until Admin/Owner sets a real rate
+  from Financial); this is also enforced server-side (see below), not just hidden in the UI.
 - **Employee**: log in, view their own attendance history only (`renderTimesheet` filters the
   staff list to `state.currentUser.uid` when `!canManage`), tick off checklist sub-tasks and
   submit checklist reports. Read-only everywhere else.
 - A Manager creating a new `staff` doc is restricted server-side to `role in ['Employee',
-  'Manager']` (`firestore.rules`) — without that split a Manager could craft a raw Firestore
-  write to self-promote to Admin/Owner via the same "create" permission that lets them add
-  employees. Don't relax the create rule to a flat `roleAtLeast('Manager')` without re-adding
-  that role allowlist.
+  'Manager'] && dailyRate == 0` (`firestore.rules`) — without the role split a Manager could
+  craft a raw Firestore write to self-promote to Admin/Owner via the same "create" permission
+  that lets them add employees; without the `dailyRate == 0` clause a crafted request could set
+  an arbitrary rate even though the UI never offers that field to a Manager. Don't relax the
+  create rule without re-adding both checks. Similarly, a Manager's `update` on an Employee doc
+  is only allowed when `request.resource.data.dailyRate == resource.data.dailyRate` (unchanged)
+  — the one field a Manager is otherwise allowed to touch on that doc must not include salary.
 
 ## Business logic: schedule, rounding, pay (Didi Malatang-specific)
 
 - Schedule: fixed `09:30–20:30` for every day of the week, no weekday/weekend split (11h span,
   1h unpaid lunch → 10 worked hours baseline). `scheduleFor(date)` in `app.js` — takes a date
   argument for call-site compatibility but the same schedule now applies regardless of the date.
-- Clock-in is rounded up to the next half hour via `roundUpToHalfHour()` — e.g. `10:10→10:30`,
-  `10:35→11:00`. Clock-out is always the fixed schedule end; there's no early-leave/overtime
-  handling — the pay model below is explicitly "no OT" (flat day rate regardless of exact hours).
-- `lateMinutes = max(0, roundedArrival − scheduledStart)`;
-  `workedHours = max(0, (scheduledEnd − roundedArrival) − 60min)` — `workedHours` is stored on
-  the attendance record for display only, it no longer feeds the pay formula (see below).
+- Two ways to write an `attendance` record, both producing the same doc shape:
+  - **Quick daily mark** (Timesheet's top "ภาพรวมการลงเวลา" section, `mark-attendance` action):
+    clock-in is rounded up to the next half hour via `roundUpToHalfHour()` — e.g. `10:10→10:30`,
+    `10:35→11:00` — and clock-out is always the fixed schedule end. This is for tapping "mark
+    present" in the moment someone actually arrives.
+  - **Monthly schedule grid** (further down the same page, `save-schedule-cell` action): both
+    clock-in and clock-out are taken from the two time inputs *exactly as typed, with no
+    rounding* — a manager consciously planning or correcting a specific day should be able to
+    enter the precise time, not have it silently rounded.
+  - `lateMinutes = max(0, clockIn − scheduledStart)`; `workedHours = max(0, (clockOut − clockIn)
+    − 60min)` (quick-mark always uses the fixed schedule end for `clockOut` here; the grid uses
+    whatever end time was entered) — `workedHours` is stored for display only, it does not feed
+    the pay formula (see below), consistent with "no OT."
+  - Every write from either path also stamps `updatedBy` (the acting user's uid) and pushes a
+    notification naming who made the change — see the Notifications section below.
 - **Every employee — full-time and part-time alike — is paid a custom per-person day rate**
   (`staff.dailyRate`, set when the account is created), not a fixed monthly salary and not a
   shared base amount. `employmentType` (`full-time`/`part-time`) is still selected at creation
@@ -158,13 +177,18 @@ changing permissions: `render()`'s nav gating, each `handleAction`/`handleForm` 
   *expected salary for a selected calendar month* (`computeExpectedSalary()`), picked via a
   native `<input type="month">` (small built-in calendar icon — **not verified on iOS Safari**,
   which has historically had inconsistent support for `type="month"`; worth testing on a real
-  iPhone before relying on it). For each day of the selected month: if the day is today or
-  earlier, use the real `attendance` record's `pay` if one exists (0 if the employee wasn't
-  marked present that day); if the day is after today, assume on-time full-day attendance and
-  add `calculateDailyPay(dailyRate, 0, isHoliday)`. This is a deliberate simplification agreed
-  with the user — the app has no concept of a fixed weekly roster, so there's no way to know
-  which *future* days a given employee is actually expected to work; it assumes every remaining
-  day in the month. Re-confirm with the user before changing this assumption.
+  iPhone before relying on it). For each day of the selected month, `computeExpectedSalary()`
+  checks for a real `attendance` record first — **an existing record always wins**, whether it's
+  a past actual clock-in or a future day a manager already planned via the Timesheet's monthly
+  schedule grid. Only when no record exists does it fall back to a date-based assumption: a
+  past/today date with no record contributes 0 (not marked present that day); a future date with
+  no record assumes on-time full-day attendance via `calculateDailyPay(dailyRate, 0, isHoliday)`.
+  That fallback is a deliberate simplification agreed with the user for days nobody has planned
+  yet — the app has no *mandatory* weekly roster, so absent a real plan it assumes every
+  remaining day is worked. Re-confirm with the user before changing this fallback.
+- Financial is also where `dailyRate` is edited (`update-employee-rate` action) — a mini-input +
+  button per employee row, same convention as the Warehouse quantity editor. Editing pushes a
+  notification naming who changed whose rate, same as attendance changes above.
 
 ## Notifications: client-triggered, not server-triggered
 
@@ -179,6 +203,12 @@ may independently write a duplicate notification. Treat this as a known, accepte
 of the no-backend approach rather than a bug to silently "fix" with more client-side
 de-duplication — a real fix would mean adding Cloud Functions, which is a bigger, separate
 decision.
+
+All attendance-related notifications (quick daily mark, clear, and every monthly schedule grid
+save/clear) name the acting user by reading `state.currentStaff.name` at the point of the write
+— they do **not** look anything up from `updatedBy` at render time. If accountability for older
+notifications matters after `state.currentStaff` is unavailable (e.g. auditing much later), the
+per-record `updatedBy` uid on the `attendance` doc itself is the durable source of truth.
 
 ## Language
 
@@ -281,12 +311,15 @@ Storage" note above; images live inline on the docs below as base64 data URLs.
   twice for the same person/day upserts instead of duplicating): `staffId`, `date`
   (`YYYY-MM-DD`), `clockIn`, `clockOut`, `lateMinutes`, `workedHours` (display only, doesn't
   feed pay), `pay` (computed via `calculateDailyPay`, for every employment type now), `isHoliday`
-  (bool, whether `calculateDailyPay` applied the 1.5x multiplier for that date), `createdAt`.
+  (bool, whether `calculateDailyPay` applied the 1.5x multiplier for that date), `updatedBy`
+  (the acting user's Auth uid — set by both the quick daily mark and the monthly schedule grid,
+  see Business logic section above), `createdAt`.
 - **`warehouseItems`**: `category` (free text — no fixed category list, same convention as
   `unit`; the Warehouse view groups items into collapsible sections by this field, falling
   back to `'อื่นๆ'` when unset), `name`, `unit` (free text — no fixed unit list), `quantity`
   (decimal, e.g. `1.5` for a partially-used pack), `imageUrl` (compressed base64 JPEG data URL,
-  or `''`), `createdAt`.
+  or `''` — settable at creation, and separately addable/replaceable later per-item via the
+  Warehouse view's "เพิ่มรูป"/"เปลี่ยนรูป" control, `update-item-photo` action), `createdAt`.
 - **`warehouseLogs`** (append-only, one doc per quantity snapshot — written whenever an item is
   created, its quantity is updated, or the stock-sheet seed imports it): `itemId`, `quantity`,
   `recordedAt`. This is the only history the app keeps of stock levels over time; it drives the

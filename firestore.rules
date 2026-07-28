@@ -30,16 +30,23 @@ service cloud.firestore {
     match /staff/{staffId} {
       allow read: if isSignedIn();
       // Managers can only create Employee/Manager profiles (the Timesheet
-      // page's "Add employee" form); Admin/Owner can create any role (the
-      // Admin page's account form). Without this split a Manager could craft
-      // a raw write to self-promote to Admin/Owner.
+      // page's "Add employee" form) and never set a nonzero pay rate on
+      // creation — the UI already omits that field for Managers, this is the
+      // server-side backstop. Admin/Owner can create any role, any rate (the
+      // Admin page's account form). Without the role split a Manager could
+      // craft a raw write to self-promote to Admin/Owner.
       allow create: if isOwnerEmail()
         || roleAtLeast('Admin')
-        || (roleAtLeast('Manager') && request.resource.data.role in ['Employee', 'Manager']);
-      // Managers may only edit/remove Employee-role profiles; Admin/Owner can
-      // touch anyone except demoting/removing the App Owner themselves.
-      allow update, delete: if isOwnerEmail()
-        || roleAtLeast('Admin') && resource.data.role != 'App Owner'
+        || (roleAtLeast('Manager') && request.resource.data.role in ['Employee', 'Manager'] && request.resource.data.dailyRate == 0);
+      // Managers may only edit/remove Employee-role profiles, and can never
+      // change dailyRate — salary is Admin+ only to view or edit (Financial
+      // tab), even though Managers otherwise manage Employee profiles day to
+      // day. Admin/Owner can touch anyone except demoting/removing the App Owner.
+      allow update: if isOwnerEmail()
+        || (roleAtLeast('Admin') && resource.data.role != 'App Owner')
+        || (roleAtLeast('Manager') && resource.data.role == 'Employee' && request.resource.data.dailyRate == resource.data.dailyRate);
+      allow delete: if isOwnerEmail()
+        || (roleAtLeast('Admin') && resource.data.role != 'App Owner')
         || (roleAtLeast('Manager') && resource.data.role == 'Employee');
     }
 
