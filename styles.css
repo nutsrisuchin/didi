@@ -97,6 +97,7 @@ textarea { min-height: 5rem; resize: vertical; }
   object-fit: cover;
 }
 .home-logo { width: 52px; height: 52px; border-radius: 50%; box-shadow: 0 4px 12px rgba(20,10,10,0.2); object-fit: cover; flex-shrink: 0; }
+.topbar-logo { width: 40px; height: 40px; border-radius: 50%; box-shadow: 0 2px 8px rgba(0,0,0,0.35); object-fit: cover; flex-shrink: 0; }
 .error { color: var(--color-danger); font-size: 0.9rem; }
 .user-chip { display: flex; align-items: center; gap: 0.75rem; color: white; font-size: 0.9rem; }
 .stock-sheet { display: grid; gap: 1rem; }

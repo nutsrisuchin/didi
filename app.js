@@ -533,20 +533,18 @@ function renderScheduleModal() {
             : `<button class="btn danger" data-action="mark-schedule-dayoff">ทำเครื่องหมายวันหยุด</button>`}
         </div>
         ${dayOff ? '' : `
-          <details style="margin-top:0.6rem">
-            <summary class="small muted" style="cursor:pointer;">หรือระบุเวลาเข้า-ออกงานที่แน่นอน (เช่น มาสาย/ออกก่อน)</summary>
-            <div class="form-grid" style="margin-top:0.5rem">
-              <label>
-                เวลาเข้างาน
-                <input type="time" id="schedule-on-input" value="${record?.clockIn || schedule.start}" />
-              </label>
-              <label>
-                เวลาเลิกงาน
-                <input type="time" id="schedule-off-input" value="${record?.clockOut || schedule.end}" />
-              </label>
-            </div>
-            <button class="btn secondary" data-action="save-schedule-cell" style="margin-top:0.5rem">บันทึกเวลาที่แน่นอน</button>
-          </details>
+          <p class="small muted" style="margin:0.6rem 0 0">หรือระบุเวลาเข้า-ออกงานที่แน่นอน (เช่น มาสาย/ออกก่อน)</p>
+          <div class="form-grid" style="margin-top:0.5rem">
+            <label>
+              เวลาเข้างาน
+              <input type="time" id="schedule-on-input" value="${record?.clockIn || schedule.start}" />
+            </label>
+            <label>
+              เวลาเลิกงาน
+              <input type="time" id="schedule-off-input" value="${record?.clockOut || schedule.end}" />
+            </label>
+          </div>
+          <button class="btn secondary" data-action="save-schedule-cell" style="margin-top:0.5rem">บันทึกเวลาที่แน่นอน</button>
         `}
         <button class="btn secondary" style="margin-top:0.8rem; width:100%;" data-action="close-schedule-cell">ปิด</button>
       </div>
@@ -802,7 +800,7 @@ function renderWarehouse() {
         <div class="stock-manage">
           <input class="mini-input" type="number" min="0" step="any" value="${item.quantity}" data-quantity-for="${item.id}" />
           <button class="btn secondary" data-action="update-item-quantity" data-id="${item.id}">อัปเดต</button>
-          <input type="file" accept="image/*" capture="environment" data-image-for="${item.id}" />
+          <input type="file" accept="image/*" data-image-for="${item.id}" />
           <button class="btn secondary" data-action="update-item-photo" data-id="${item.id}">${item.imageUrl ? 'เปลี่ยนรูป' : 'เพิ่มรูป'}</button>
           <button class="btn danger" data-action="delete-item" data-id="${item.id}">ลบ</button>
         </div>
@@ -857,7 +855,7 @@ function renderWarehouse() {
               </label>
               <label>
                 รูปภาพ
-                <input name="image" type="file" accept="image/*" capture="environment" />
+                <input name="image" type="file" accept="image/*" />
               </label>
             </div>
             <button class="btn" type="submit">เพิ่มสินค้า</button>
@@ -1157,6 +1155,14 @@ function renderNotifications() {
       </section>
     </div>
   `;
+}
+
+// Every delete action requires confirming twice in a row (two separate
+// native confirm() prompts) rather than once — deletes in this app are
+// permanent (no undo, no trash/recycle bin), so this is deliberately more
+// friction than a typical single "are you sure?".
+function confirmDeleteTwice(message) {
+  return confirm(message) && confirm(`ยืนยันอีกครั้ง: ${message}`);
 }
 
 function bindView() {
@@ -1540,6 +1546,8 @@ async function handleAction(action, data) {
 
   if (action === 'delete-item') {
     if (!roleAtLeast('Manager')) return;
+    const item = state.warehouseItems.find((entry) => entry.id === data.id);
+    if (!confirmDeleteTwice(`ต้องการลบ "${item?.name || ''}" ออกจากคลังสินค้าใช่หรือไม่?`)) return;
     await DB.del('warehouseItems', data.id);
     removeLocal('warehouseItems', data.id);
     render();
@@ -1548,6 +1556,8 @@ async function handleAction(action, data) {
 
   if (action === 'delete-routine') {
     if (!roleAtLeast('Manager')) return;
+    const routine = state.routines.find((entry) => entry.id === data.id);
+    if (!confirmDeleteTwice(`ต้องการลบเช็คลิสต์ "${routine?.name || ''}" ใช่หรือไม่?`)) return;
     await DB.del('routines', data.id);
     removeLocal('routines', data.id);
     render();
@@ -1562,6 +1572,7 @@ async function handleAction(action, data) {
     const person = state.staff.find((entry) => entry.id === data.id);
     if (!person || person.role === 'App Owner') return;
     if (!roleAtLeast('Admin') && person.role !== 'Employee') return;
+    if (!confirmDeleteTwice(`ต้องการลบสิทธิ์การเข้าถึงของ "${person.name}" ใช่หรือไม่?`)) return;
     await DB.del('staff', data.id);
     removeLocal('staff', data.id);
     render();
@@ -1617,6 +1628,8 @@ async function handleAction(action, data) {
 
   if (action === 'delete-holiday') {
     if (!roleAtLeast('Admin')) return;
+    const holiday = state.holidays.find((entry) => entry.id === data.id);
+    if (!confirmDeleteTwice(`ต้องการลบวันหยุด "${formatDate(holiday?.date)}${holiday?.name ? ` (${holiday.name})` : ''}" ใช่หรือไม่?`)) return;
     await DB.del('holidays', data.id);
     removeLocal('holidays', data.id);
     render();

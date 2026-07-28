@@ -9,7 +9,9 @@ similar "no-build, vanilla JS + Firebase, hosted on GitHub Pages" project.
 **Didi Malatang Hub** — a staff timesheet/payroll, ingredient warehouse, and routine
 food-safety-style inspection app for **Didi Malatang**, a malatang restaurant. Vanilla HTML/CSS/JS, no
 framework, no build step, no `package.json`. Backed by Firebase (Firestore + Auth only — no
-Storage, see below). Deployed on GitHub Pages, auto-deploys on push to `main`.
+Storage, see below). Deployed on GitHub Pages, auto-deploys on push to `main`. This CLAUDE.md and
+the repo/title still say "Didi Malatang Hub" for clarity, but the **UI itself now displays just
+"Didi Malatang"** (topbar and login gate) — the "Hub" was dropped from user-facing text only.
 
 | File | Purpose |
 |---|---|
@@ -183,10 +185,12 @@ changing permissions: `render()`'s nav gating, each `handleAction`/`handleForm` 
     `10:10→10:30`, `10:35→11:00` — and clock-out is always the fixed schedule end. This is for
     tapping "mark present" in the moment someone actually arrives.
   - **Monthly schedule grid, exact-time override** (`save-schedule-cell` action, inside the
-    schedule-cell popup — see the modal system note above — behind a further collapsed
-    `<details>` disclosure so it isn't the first thing a manager sees for an ordinary day): both
-    clock-in and clock-out are taken from the two time inputs *exactly as typed, with no
-    rounding* — for correcting a specific day (e.g. someone came in late), not for routine use.
+    schedule-cell popup — see the modal system note above; both the day-off button and the
+    exact-time inputs are visible at once, not behind a further disclosure — an earlier version
+    hid the time inputs behind a collapsed `<details>` but the user asked for them always
+    visible instead): both clock-in and clock-out are taken from the two time inputs *exactly as
+    typed, with no rounding* — for correcting a specific day (e.g. someone came in late), not for
+    routine use.
   - **Monthly schedule grid, day-off marker** (`mark-schedule-dayoff` action — the grid's primary,
     one-tap action): writes `dayOff: true` with `clockIn`/`clockOut` null and `pay: 0`. Undoing it
     (`clear-schedule-cell`) simply **deletes** the record, reverting to the implicit "working"
@@ -297,9 +301,13 @@ Restaurant staff use this on their phones, so these are checked for every new UI
   `env(safe-area-inset-*)` — see `.login-gate`'s `padding-top`.
 - When genuinely unsure how something behaves on iPhone Safari vs. desktop Chrome (camera
   `capture="environment"` input behavior, viewport height quirks), say so explicitly rather
-  than assuming parity — this app relies on `<input type="file" capture="environment">` for
-  warehouse/routine photo capture, which is worth testing on an actual device if a bug is
-  ever reported there.
+  than assuming parity. Checklist photo inputs still use
+  `<input type="file" accept="image/*" capture="environment">`, worth testing on a real device
+  if a bug is reported there. **Warehouse item photo inputs deliberately dropped `capture`** —
+  it was forcing the camera open directly on some mobile browsers instead of also offering
+  "choose from library," and warehouse items are just as often photographed from an existing
+  gallery shot as a fresh one. Don't re-add `capture` to the warehouse inputs without checking
+  this reasoning still applies.
 
 ## [Reusable] GitHub Pages deployment gotchas
 
@@ -319,6 +327,13 @@ Restaurant staff use this on their phones, so these are checked for every new UI
 - **Always `node --check <file>.js` after every edit**, before considering a change done — no
   build step, no CI, so a syntax error would otherwise only surface live in the browser
   console.
+- **Every delete action requires confirming twice**, via `confirmDeleteTwice(message)` in
+  `app.js` — two separate native `confirm()` prompts in a row, not one. Deletes in this app are
+  permanent (no undo, no trash/recycle bin), so this was an explicit user request for more
+  friction than the single "are you sure?" pattern most apps use. Applies to `delete-item`,
+  `delete-routine`, `delete-staff`, `delete-holiday` — any new delete action added later should
+  follow the same pattern, with a message naming the specific thing being deleted (not a generic
+  "are you sure?").
 - Commits are created only when explicitly asked, generally batched into one commit per
   logical feature, with a message explaining *why* — and pushed only when explicitly asked.
   Don't assume standing permission to push from one instance of "commit and push now."
