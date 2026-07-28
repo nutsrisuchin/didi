@@ -394,10 +394,20 @@ Storage" note above; images live inline on the docs below as base64 data URLs.
   what is otherwise a pure relabel+redesign): `name`, `description` (short free-text summary),
   `detail` (longer free-text instructions), `subtasks` (array of `{id, text}`, parsed from a
   one-line-per-subtask textarea on the create form — no per-definition "done" state, since
-  that's re-ticked fresh on every completion), `frequencyDays`, `lastInspectedAt`,
+  that's re-ticked fresh on every completion), `timeOfDay` (`''`/`'before-open'`/`'after-close'`
+  — a purely informational tag shown as a badge, doesn't affect scheduling), `lastInspectedAt`,
   `lastInspectedImageUrl` (persists across completions — only overwritten when a report attaches
-  a new photo), `createdAt`. `getRoutineStatus()` compares `lastInspectedAt + frequencyDays`
-  against `now`.
+  a new photo), `createdAt`, and **two mutually-exclusive ways to express recurrence**:
+  - `frequencyDays` (number) — the original "every N days" model, due when
+    `lastInspectedAt + frequencyDays < now`.
+  - `weekdays` (array of `Date.getDay()` values, `0`=Sunday…`6`=Saturday) — due starting midnight
+    on any selected weekday until completed that same day, not due at all on the other days of
+    the week. **When `weekdays` is non-empty it completely overrides `frequencyDays`** — they
+    don't combine. `getRoutineStatus()` and `frequencyLabel()` (both in `app.js`) both check
+    `weekdays` first and only fall back to the `frequencyDays` calculation when it's absent/empty.
+    The create form doesn't dynamically hide either input; it just labels the `frequencyDays`
+    field "used when you haven't picked weekdays below" and lets `weekdays` take precedence at
+    submission if any checkbox was ticked.
 - **`routineInspections`** (append-only "checklist report" log, separate from `routines` itself
   — the Checklist view calls submitting one of these "Submit report"): `routineId`, `staffId`,
   `imageUrl` (this specific report's photo, `''` if none attached — distinct from the routine's

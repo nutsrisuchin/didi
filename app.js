@@ -160,11 +160,32 @@ function getAttendanceForDate(staffId, date) {
   return state.attendance.find((entry) => entry.id === attendanceId(staffId, date)) || null;
 }
 
+// Two ways a checklist's due-ness is computed: a plain "every N days" interval
+// (the original model), or specific weekdays (routine.weekdays, an array of
+// Date.getDay() values 0-6) — due starting midnight on a selected weekday
+// until it's completed that same day, and simply not due at all on the other
+// days of the week. weekdays (when present and non-empty) takes over from
+// frequencyDays entirely rather than the two combining.
 function getRoutineStatus(routine) {
+  if (Array.isArray(routine.weekdays) && routine.weekdays.length) {
+    if (!routine.weekdays.includes(new Date().getDay())) return 'on-track';
+    const lastDate = routine.lastInspectedAt ? routine.lastInspectedAt.slice(0, 10) : null;
+    return lastDate === todayISO() ? 'on-track' : 'overdue';
+  }
   const last = routine.lastInspectedAt ? new Date(routine.lastInspectedAt) : new Date(routine.createdAt || nowISO());
   const due = new Date(last);
   due.setDate(due.getDate() + Number(routine.frequencyDays || 1));
   return due < new Date() ? 'overdue' : 'on-track';
+}
+
+const TIME_OF_DAY_LABEL_TH = { 'before-open': 'ก่อนเปิดร้าน', 'after-close': 'หลังปิดร้าน' };
+
+function frequencyLabel(routine) {
+  if (Array.isArray(routine.weekdays) && routine.weekdays.length) {
+    const days = [...routine.weekdays].sort().map((day) => THAI_WEEKDAY_SHORT[day]).join(' ');
+    return `ทุกวัน ${days}`;
+  }
+  return `ทุก ${routine.frequencyDays} วัน`;
 }
 
 function upsertLocal(collection, record) {
@@ -912,8 +933,8 @@ function renderRoutines() {
         <div class="row" style="justify-content:space-between">
           <div>
             <strong>${routine.name}</strong>
-            <div class="muted">ทุก ${routine.frequencyDays} วัน · ทำครั้งล่าสุดเมื่อ ${formatDate(routine.lastInspectedAt)}</div>
-            <div class="small">สถานะ: <span class="badge ${status === 'overdue' ? 'overdue' : ''}">${routineStatusLabel(status)}</span></div>
+            <div class="muted">${frequencyLabel(routine)} · ทำครั้งล่าสุดเมื่อ ${formatDate(routine.lastInspectedAt)}</div>
+            <div class="small">สถานะ: <span class="badge ${status === 'overdue' ? 'overdue' : ''}">${routineStatusLabel(status)}</span>${routine.timeOfDay ? ` <span class="badge">${TIME_OF_DAY_LABEL_TH[routine.timeOfDay] || routine.timeOfDay}</span>` : ''}</div>
           </div>
           ${canManage ? `<button class="btn danger" data-action="delete-routine" data-id="${routine.id}">ลบ</button>` : ''}
         </div>
@@ -946,10 +967,30 @@ function renderRoutines() {
                 <input name="name" required />
               </label>
               <label>
-                ความถี่ (วัน)
-                <input name="frequencyDays" type="number" min="1" value="7" required />
+                ความถี่ (วัน) — ใช้เมื่อไม่ได้เลือกวันในสัปดาห์ด้านล่าง
+                <input name="frequencyDays" type="number" min="1" value="7" />
               </label>
             </div>
+            <label>
+              หรือทำเฉพาะวันในสัปดาห์ (เลือกแล้วจะใช้แทนความถี่ด้านบน)
+              <div class="row">
+                <label class="row" style="gap:0.3rem"><input type="checkbox" name="weekday" value="1" /> จ</label>
+                <label class="row" style="gap:0.3rem"><input type="checkbox" name="weekday" value="2" /> อ</label>
+                <label class="row" style="gap:0.3rem"><input type="checkbox" name="weekday" value="3" /> พ</label>
+                <label class="row" style="gap:0.3rem"><input type="checkbox" name="weekday" value="4" /> พฤ</label>
+                <label class="row" style="gap:0.3rem"><input type="checkbox" name="weekday" value="5" /> ศ</label>
+                <label class="row" style="gap:0.3rem"><input type="checkbox" name="weekday" value="6" /> ส</label>
+                <label class="row" style="gap:0.3rem"><input type="checkbox" name="weekday" value="0" /> อา</label>
+              </div>
+            </label>
+            <label>
+              ช่วงเวลา (ถ้ามี)
+              <select name="timeOfDay">
+                <option value="">ไม่ระบุ</option>
+                <option value="before-open">ก่อนเปิดร้าน</option>
+                <option value="after-close">หลังปิดร้าน</option>
+              </select>
+            </label>
             <label>
               คำอธิบาย
               <input name="description" placeholder="สรุปสั้นๆ" />
@@ -1283,12 +1324,15 @@ async function handleForm(name, formData) {
       .map((line) => line.trim())
       .filter(Boolean)
       .map((text) => ({ id: DB.uid('task'), text }));
+    const weekdays = formData.getAll('weekday').map(Number);
     const routine = {
       id: DB.uid('routine'),
       name: formData.get('name'),
       description: formData.get('description') || '',
       detail: formData.get('detail') || '',
+      timeOfDay: formData.get('timeOfDay') || '',
       subtasks,
+      weekdays,
       frequencyDays: Number(formData.get('frequencyDays') || 7),
       lastInspectedAt: nowISO(),
       lastInspectedImageUrl: '',
@@ -1296,7 +1340,7 @@ async function handleForm(name, formData) {
     };
     await DB.put('routines', routine);
     upsertLocal('routines', routine);
-    await pushNotification('สร้างเช็คลิสต์แล้ว', `${routine.name} จะทำซ้ำทุก ${routine.frequencyDays} วัน`);
+    await pushNotification('สร้างเช็คลิสต์แล้ว', `${routine.name} — ${frequencyLabel(routine)}`);
     render();
     return;
   }
