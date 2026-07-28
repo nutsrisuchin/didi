@@ -648,6 +648,7 @@ function renderTimesheet() {
             </div>
             ${!showSalary ? '<p class="muted small">ผู้จัดการเพิ่มพนักงานได้ แต่แอดมินหรือเจ้าของร้านต้องเป็นผู้ตั้งค่าจ้างต่อวันภายหลังในหน้าการเงิน</p>' : ''}
             <button class="btn" type="submit">เพิ่มพนักงาน</button>
+            <p id="employee-form-error" class="error" hidden></p>
           </form>
         </section>
       ` : ''}
@@ -995,6 +996,7 @@ function renderAdmin() {
             </label>
           </div>
           <button class="btn" type="submit">เพิ่มบัญชี</button>
+          <p id="staff-form-error" class="error" hidden></p>
         </form>
       </section>
       <section class="card">
@@ -1140,6 +1142,28 @@ function bindView() {
   });
 }
 
+// Auth account creation and the Firestore staff-doc write happen as two
+// separate steps (createStaffMember below) with no rollback between them —
+// if the doc write fails after the Auth account already succeeded, that
+// Auth login is now orphaned (no staff doc) and its email is permanently
+// taken, so retrying with the exact same name will always fail here with
+// auth/email-already-in-use. Surfacing the real reason (instead of previously
+// failing silently with no feedback at all) is what lets someone notice and
+// pick a different name, or ask an Admin to delete the orphaned login from
+// the Firebase console.
+function showStaffFormError(elementId, error) {
+  const el = document.querySelector(`#${elementId}`);
+  if (!el) return;
+  const messages = {
+    'auth/email-already-in-use': 'ชื่อนี้เคยถูกใช้สร้างบัญชีมาก่อน (แม้จะเคยลบพนักงานนั้นออกไปแล้วก็ตาม) กรุณาใช้ชื่ออื่น หรือแจ้งแอดมินให้ลบบัญชีเดิมออกจาก Firebase console',
+    'auth/weak-password': 'รหัส PIN สั้นเกินไป ต้องมีอย่างน้อย 6 ตัวอักษร',
+    'auth/invalid-email': 'ไม่สามารถสร้างชื่อผู้ใช้จากชื่อนี้ได้ กรุณาลองใช้ชื่ออื่น',
+    'permission-denied': 'ไม่มีสิทธิ์เพิ่มบัญชีนี้'
+  };
+  el.textContent = messages[error?.code] || `เกิดข้อผิดพลาด: ${error?.message || 'ไม่ทราบสาเหตุ'}`;
+  el.hidden = false;
+}
+
 async function createStaffMember(formData) {
   const name = formData.get('name');
   const role = formData.get('role');
@@ -1164,17 +1188,25 @@ async function createStaffMember(formData) {
 async function handleForm(name, formData) {
   if (name === 'employee-form') {
     if (!roleAtLeast('Manager')) return;
-    const employee = await createStaffMember(formData);
-    await pushNotification('เพิ่มพนักงานแล้ว', `${employee.name} พร้อมใช้งานในระบบลงเวลาแล้ว`);
-    render();
+    try {
+      const employee = await createStaffMember(formData);
+      await pushNotification('เพิ่มพนักงานแล้ว', `${employee.name} พร้อมใช้งานในระบบลงเวลาแล้ว`);
+      render();
+    } catch (error) {
+      showStaffFormError('employee-form-error', error);
+    }
     return;
   }
 
   if (name === 'staff-form') {
     if (!roleAtLeast('Admin')) return;
-    const person = await createStaffMember(formData);
-    await pushNotification('เพิ่มบัญชีผู้ดูแลแล้ว', `${person.name} ได้รับสิทธิ์ ${roleLabel(person.role)} แล้ว`);
-    render();
+    try {
+      const person = await createStaffMember(formData);
+      await pushNotification('เพิ่มบัญชีผู้ดูแลแล้ว', `${person.name} ได้รับสิทธิ์ ${roleLabel(person.role)} แล้ว`);
+      render();
+    } catch (error) {
+      showStaffFormError('staff-form-error', error);
+    }
     return;
   }
 
