@@ -57,9 +57,19 @@ Storage, see below). Deployed on GitHub Pages, auto-deploys on push to `main`.
   `roleAtLeast(...)` itself before writing, even though the UI already hides the triggering
   button for insufficient roles. The UI gating is just UX; `handleAction`'s own check plus the
   Firestore rule are the actual enforcement — treat all three as required, not redundant.
-- There is no modal system yet (no `#modal-host`) — every view renders inline into `#view`.
-  If a future feature needs a modal, that's new infrastructure to design, not an existing
-  convention to reuse.
+- There's a minimal modal system: `#modal-host` in `index.html`, a sibling of `#app-root` so it
+  isn't affected by that element's own `hidden` toggling. `render()` sets its `innerHTML` from
+  `renderScheduleModal()` on every render cycle, same as any other view — the modal has no
+  separate render loop of its own, it's just driven by `state.selectedScheduleCell` like
+  everything else is driven by `state`. `bindView()`'s generic `[data-action]` wiring covers
+  buttons inside the modal automatically since it queries the whole document, not just `#view`;
+  the one bit of custom wiring is `.modal-backdrop`'s click handler, which only fires
+  `close-schedule-cell` when `event.target === backdrop` itself (i.e. the darkened area, not a
+  click occurring somewhere inside `.modal-card` and bubbling up) — this is the only place in the
+  app that checks `event.target` rather than relying purely on `data-action` dispatch. Everywhere
+  else in the app still renders inline into `#view` with no modal — this exists specifically
+  because a 31-row schedule grid made "scroll down to an inline editor panel" impractical; don't
+  reach for a modal elsewhere without a similarly concrete reason.
 
 ## [Reusable] Firebase Auth/Firestore setup pattern
 
@@ -136,9 +146,11 @@ changing permissions: `render()`'s nav gating, each `handleAction`/`handleForm` 
   their own row. The "Add employee" form correspondingly drops its `dailyRate` field entirely
   when the viewer isn't Admin+ (new hires get `dailyRate: 0` until Admin/Owner sets a real rate
   from Financial); this is also enforced server-side (see below), not just hidden in the UI.
-- **Employee**: log in, view their own attendance history only (`renderTimesheet` filters the
-  staff list to `state.currentUser.uid` when `!canManage`), tick off checklist sub-tasks and
-  submit checklist reports. Read-only everywhere else.
+- **Employee**: log in, tick off checklist sub-tasks and submit checklist reports. On Timesheet,
+  sees *only* a read-only monthly schedule grid for themselves (`renderTimesheet` early-returns a
+  completely different, much shorter view when `!canManage` — no daily quick-mark panel, no
+  editable cells, `renderMonthlySchedule(staffList, false)` renders plain `<span>`s instead of
+  buttons). Read-only everywhere else.
 - A Manager creating a new `staff` doc is restricted server-side to `role in ['Employee',
   'Manager'] && dailyRate == 0` (`firestore.rules`) — without the role split a Manager could
   craft a raw Firestore write to self-promote to Admin/Owner via the same "create" permission
@@ -164,14 +176,17 @@ changing permissions: `render()`'s nav gating, each `handleAction`/`handleForm` 
   result — `computeExpectedSalary()`, `renderMonthlySchedule()`, `renderScheduleSummary()` — not
   in the data layer itself.
 - Three ways an `attendance` record gets written, all producing the same doc shape:
-  - **Quick daily mark** (Timesheet's top "ภาพรวมการลงเวลา" section, `mark-attendance` action):
-    clock-in is rounded up to the next half hour via `roundUpToHalfHour()` — e.g. `10:10→10:30`,
-    `10:35→11:00` — and clock-out is always the fixed schedule end. This is for tapping "mark
-    present" in the moment someone actually arrives.
-  - **Monthly schedule grid, exact-time override** (`save-schedule-cell` action, behind a
-    collapsed `<details>` disclosure so it isn't the first thing a manager sees for an ordinary
-    day): both clock-in and clock-out are taken from the two time inputs *exactly as typed, with
-    no rounding* — for correcting a specific day (e.g. someone came in late), not for routine use.
+  - **Quick daily mark** (Timesheet's "ภาพรวมการลงเวลา" section, `mark-attendance` action, itself
+    behind a collapsed `<details>`/`<summary>` — `.schedule-daily-summary` in `styles.css` — so
+    the per-employee list with its buttons isn't taking up screen space by default on every
+    visit): clock-in is rounded up to the next half hour via `roundUpToHalfHour()` — e.g.
+    `10:10→10:30`, `10:35→11:00` — and clock-out is always the fixed schedule end. This is for
+    tapping "mark present" in the moment someone actually arrives.
+  - **Monthly schedule grid, exact-time override** (`save-schedule-cell` action, inside the
+    schedule-cell popup — see the modal system note above — behind a further collapsed
+    `<details>` disclosure so it isn't the first thing a manager sees for an ordinary day): both
+    clock-in and clock-out are taken from the two time inputs *exactly as typed, with no
+    rounding* — for correcting a specific day (e.g. someone came in late), not for routine use.
   - **Monthly schedule grid, day-off marker** (`mark-schedule-dayoff` action — the grid's primary,
     one-tap action): writes `dayOff: true` with `clockIn`/`clockOut` null and `pay: 0`. Undoing it
     (`clear-schedule-cell`) simply **deletes** the record, reverting to the implicit "working"
@@ -356,8 +371,9 @@ Storage" note above; images live inline on the docs below as base64 data URLs.
   between them to produce a rate — until then `computeStockInsight` returns `{ hasData: false }`
   and the item is excluded from the priority list (shown instead as a "not enough data yet"
   count). The Home page's "Warehouse health" card (`.card.clickable`, `data-action="nav-warehouse"`)
-  navigates straight into this section rather than opening a modal, consistent with this app
-  having no modal system.
+  navigates straight into this section rather than opening a modal — a modal now exists elsewhere
+  in the app (see the modal system note above) but wasn't the right fit here, since this is "go
+  look at a whole page of detail," not "edit one small thing in place."
 - **`routines`** (user-facing label is "Checklist" throughout the UI — the collection name and
   internal `state.view === 'routines'` were kept as-is to avoid a Firestore-path/rules churn for
   what is otherwise a pure relabel+redesign): `name`, `description` (short free-text summary),

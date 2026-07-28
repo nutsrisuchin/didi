@@ -141,6 +141,7 @@ textarea { min-height: 5rem; resize: vertical; }
 .schedule-table th, .schedule-summary-table th { background: var(--color-cream-tint); color: var(--color-primary-dark); font-size: 0.8rem; }
 .schedule-daylabel { font-weight: 600; background: var(--color-bg); }
 .schedule-cell {
+  display: block;
   border: none;
   background: transparent;
   width: 100%;
@@ -153,6 +154,36 @@ textarea { min-height: 5rem; resize: vertical; }
 .schedule-cell.off { background: var(--color-overdue-bg); color: var(--color-muted); }
 .schedule-cell.late { color: var(--color-danger); font-weight: 700; }
 .schedule-cell.selected { outline: 2px solid var(--color-gold); outline-offset: -2px; }
+span.schedule-cell { cursor: default; }
+.schedule-daily-summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 1.05rem;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  color: var(--color-primary-dark);
+}
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(20,10,10,0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  z-index: 100;
+}
+.modal-card {
+  background: var(--color-surface);
+  border-radius: 18px;
+  padding: 1.25rem;
+  width: 100%;
+  max-width: 400px;
+  max-height: 85vh;
+  overflow-y: auto;
+  box-shadow: 0 20px 45px rgba(20,10,10,0.4);
+}
 @media (max-width: 900px) { .app-shell { grid-template-columns: 1fr; } .sidebar { border-right: none; border-bottom: 1px solid var(--color-border); } }
 @media (max-width: 650px) {
   .topbar { flex-direction: column; align-items: flex-start; }

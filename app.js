@@ -360,6 +360,7 @@ function render() {
   } else if (state.view === 'financial') {
     content.innerHTML = renderFinancial();
   }
+  document.querySelector('#modal-host').innerHTML = renderScheduleModal();
   bindView();
   document.querySelectorAll('.nav-btn').forEach((button) => {
     const roleMin = button.dataset.roleMin;
@@ -438,7 +439,7 @@ function renderHome() {
 // scheduled, on time" default, since requiring a manager to fill in two time
 // fields for every single normal working day was the actual complaint this
 // redesign responds to.
-function renderMonthlySchedule(staffList) {
+function renderMonthlySchedule(staffList, interactive = true) {
   const dates = datesInMonth(state.timesheetMonth);
   const headerCells = staffList.map((employee) => `<th>${employee.name}</th>`).join('');
 
@@ -457,7 +458,9 @@ function renderMonthlySchedule(staffList) {
       if (record && !dayOff && record.lateMinutes > 0) classes.push('late');
       if (selected) classes.push('selected');
       const label = dayOff ? 'หยุด' : record ? `${record.clockIn}-${record.clockOut}` : `${schedule.start}-${schedule.end}`;
-      return `<td><button type="button" class="${classes.join(' ')}" data-action="select-schedule-cell" data-staff-id="${employee.id}" data-date="${dateStr}">${label}</button></td>`;
+      return interactive
+        ? `<td><button type="button" class="${classes.join(' ')}" data-action="select-schedule-cell" data-staff-id="${employee.id}" data-date="${dateStr}">${label}</button></td>`
+        : `<td><span class="${classes.join(' ')}">${label}</span></td>`;
     }).join('');
     return `<tr><td class="schedule-daylabel">${dayOfWeek} ${dayNum}</td>${cells}</tr>`;
   }).join('');
@@ -503,53 +506,84 @@ function renderScheduleSummary(staffList) {
   `;
 }
 
-function renderScheduleEditor(staffList) {
+// Popup instead of an inline panel further down the page — clicking a cell
+// in a 31-row grid used to mean scrolling all the way down to find the
+// editor, which is exactly the "hard to work with" complaint this responds
+// to. This is the app's first modal; see #modal-host in index.html and the
+// backdrop-click-to-close wiring in bindView().
+function renderScheduleModal() {
   if (!state.selectedScheduleCell) return '';
   const { staffId, date } = state.selectedScheduleCell;
-  const employee = staffList.find((entry) => entry.id === staffId);
-  if (!employee) return '';
+  const employee = state.staff.find((entry) => entry.id === staffId);
+  if (!employee) {
+    state.selectedScheduleCell = null;
+    return '';
+  }
   const record = getAttendanceForDate(staffId, date);
   const dayOff = record?.dayOff === true;
   const schedule = scheduleFor(date);
   return `
-    <div class="card" style="box-shadow:none; border:1px solid var(--color-border-soft); margin-top:0.8rem;">
-      <h3 style="margin:0 0 0.5rem">${employee.name} · ${formatDate(date)}</h3>
-      <p class="muted small">ค่าเริ่มต้นคือมาทำงานตามปกติ (${schedule.start}-${schedule.end}) ไม่ต้องทำอะไรเพิ่ม เว้นแต่วันนี้เป็นวันหยุด</p>
-      <div class="row">
-        ${dayOff
-          ? `<button class="btn" data-action="clear-schedule-cell">ยกเลิกวันหยุด (กลับมาทำงานตามปกติ)</button>`
-          : `<button class="btn danger" data-action="mark-schedule-dayoff">ทำเครื่องหมายวันหยุด</button>`}
-        <button class="btn secondary" data-action="close-schedule-cell">ปิด</button>
+    <div class="modal-backdrop">
+      <div class="modal-card">
+        <h3 style="margin:0 0 0.5rem">${employee.name} · ${formatDate(date)}</h3>
+        <p class="muted small">ค่าเริ่มต้นคือมาทำงานตามปกติ (${schedule.start}-${schedule.end}) ไม่ต้องทำอะไรเพิ่ม เว้นแต่วันนี้เป็นวันหยุด</p>
+        <div class="stack">
+          ${dayOff
+            ? `<button class="btn" data-action="clear-schedule-cell">ยกเลิกวันหยุด (กลับมาทำงานตามปกติ)</button>`
+            : `<button class="btn danger" data-action="mark-schedule-dayoff">ทำเครื่องหมายวันหยุด</button>`}
+        </div>
+        ${dayOff ? '' : `
+          <details style="margin-top:0.6rem">
+            <summary class="small muted" style="cursor:pointer;">หรือระบุเวลาเข้า-ออกงานที่แน่นอน (เช่น มาสาย/ออกก่อน)</summary>
+            <div class="form-grid" style="margin-top:0.5rem">
+              <label>
+                เวลาเข้างาน
+                <input type="time" id="schedule-on-input" value="${record?.clockIn || schedule.start}" />
+              </label>
+              <label>
+                เวลาเลิกงาน
+                <input type="time" id="schedule-off-input" value="${record?.clockOut || schedule.end}" />
+              </label>
+            </div>
+            <button class="btn secondary" data-action="save-schedule-cell" style="margin-top:0.5rem">บันทึกเวลาที่แน่นอน</button>
+          </details>
+        `}
+        <button class="btn secondary" style="margin-top:0.8rem; width:100%;" data-action="close-schedule-cell">ปิด</button>
       </div>
-      ${dayOff ? '' : `
-        <details style="margin-top:0.6rem">
-          <summary class="small muted" style="cursor:pointer;">หรือระบุเวลาเข้า-ออกงานที่แน่นอน (เช่น มาสาย/ออกก่อน)</summary>
-          <div class="form-grid" style="margin-top:0.5rem">
-            <label>
-              เวลาเข้างาน
-              <input type="time" id="schedule-on-input" value="${record?.clockIn || schedule.start}" />
-            </label>
-            <label>
-              เวลาเลิกงาน
-              <input type="time" id="schedule-off-input" value="${record?.clockOut || schedule.end}" />
-            </label>
-          </div>
-          <button class="btn secondary" data-action="save-schedule-cell" style="margin-top:0.5rem">บันทึกเวลาที่แน่นอน</button>
-        </details>
-      `}
     </div>
   `;
 }
 
 function renderTimesheet() {
   const canManage = roleAtLeast('Manager');
-  // Managers can schedule/mark attendance for everyone but never see pay
-  // figures, even their own — only Admin+ (or an Employee viewing their own
-  // row) sees dailyRate/pay. See CLAUDE.md's RBAC section.
-  const showSalary = roleAtLeast('Admin') || !canManage;
   const staffList = canManage
     ? state.staff.filter((s) => s.employmentType)
     : state.staff.filter((s) => s.id === state.currentUser?.uid);
+
+  // Employees only get a read-only view of their own monthly schedule —
+  // marking/editing attendance for anyone (including themselves) is
+  // Manager+ only, and the daily quick-mark panel is irrelevant to them.
+  if (!canManage) {
+    return `
+      <div class="grid">
+        <section class="card">
+          <h2 style="margin-top:0">ตารางเวลาประจำเดือนของคุณ</h2>
+          <form data-form="schedule-month-form" class="row">
+            <label style="min-width:220px">
+              เดือน
+              <input type="month" name="month" value="${state.timesheetMonth}" />
+            </label>
+            <button class="btn" type="submit">ดู</button>
+          </form>
+          <div style="overflow-x:auto; margin-top:0.8rem;">${renderMonthlySchedule(staffList, false)}</div>
+        </section>
+      </div>
+    `;
+  }
+
+  // Admin+ sees dailyRate/pay; Manager never does, even their own. See
+  // CLAUDE.md's RBAC section.
+  const showSalary = roleAtLeast('Admin');
 
   const rows = staffList.map((employee) => {
     const entry = getAttendanceForDate(employee.id, state.currentDate);
@@ -565,14 +599,12 @@ function renderTimesheet() {
               ? `<div class="small">เข้างาน ${entry.clockIn} · เลิกงาน ${entry.clockOut} · ทำงาน ${entry.workedHours} ชม. · มาสาย ${entry.lateMinutes} นาที${entry.pay !== null && showSalary ? ` · ค่าจ้าง ${formatCurrency(entry.pay)}` : ''}${entry.isHoliday ? ' · <span class="badge">วันหยุดนักขัตฤกษ์ x1.5</span>' : ''}</div>`
               : `<div class="small">ยังไม่ได้ลงเวลาวันนี้ (ค่าเริ่มต้น: มาทำงานตามปกติ ${schedule.start}-${schedule.end})</div>`}
         </div>
-        ${canManage ? `
-          <div class="row">
-            <input class="mini-input" type="time" value="${entry?.clockIn || schedule.start}" data-arrival-for="${employee.id}" />
-            <button class="btn" data-action="mark-attendance" data-id="${employee.id}">บันทึกเข้างาน</button>
-            <button class="btn secondary" data-action="clear-attendance" data-id="${employee.id}">ล้างข้อมูล</button>
-            ${employee.role === 'Employee' ? `<button class="btn danger" data-action="delete-staff" data-id="${employee.id}">ลบพนักงาน</button>` : ''}
-          </div>
-        ` : ''}
+        <div class="row">
+          <input class="mini-input" type="time" value="${entry?.clockIn || schedule.start}" data-arrival-for="${employee.id}" />
+          <button class="btn" data-action="mark-attendance" data-id="${employee.id}">บันทึกเข้างาน</button>
+          <button class="btn secondary" data-action="clear-attendance" data-id="${employee.id}">ล้างข้อมูล</button>
+          ${employee.role === 'Employee' ? `<button class="btn danger" data-action="delete-staff" data-id="${employee.id}">ลบพนักงาน</button>` : ''}
+        </div>
       </div>
     `;
   }).join('');
@@ -590,31 +622,29 @@ function renderTimesheet() {
         </form>
       </section>
       <section class="card">
-        <div class="row">
-          <h2 style="margin:0">${canManage ? 'พนักงาน' : 'การลงเวลาของคุณ'} วันที่ ${formatDate(state.currentDate)}</h2>
-        </div>
-        <div class="list" style="margin-top:0.8rem">${rows || '<p class="muted">ไม่มีข้อมูลให้แสดง</p>'}</div>
+        <details>
+          <summary class="schedule-daily-summary">พนักงาน วันที่ ${formatDate(state.currentDate)} (แตะเพื่อดู/แก้ไข)</summary>
+          <div class="list" style="margin-top:0.8rem">${rows || '<p class="muted">ไม่มีข้อมูลให้แสดง</p>'}</div>
+        </details>
       </section>
-      ${canManage ? `
-        <section class="card">
-          <h2 style="margin-top:0">ตารางเวลาประจำเดือน</h2>
-          <form data-form="schedule-month-form" class="row">
-            <label style="min-width:220px">
-              เดือน
-              <input type="month" name="month" value="${state.timesheetMonth}" />
-            </label>
-            <button class="btn" type="submit">ดู</button>
-          </form>
-          <p class="muted small" style="margin-top:0.5rem">แตะที่ช่องเพื่อวางแผนหรือแก้ไขเวลาเข้า-ออกงานของแต่ละวัน ช่องสีแดงคือวันหยุด</p>
-          <div style="overflow-x:auto; margin-top:0.8rem;">${renderMonthlySchedule(staffList)}</div>
-          ${renderScheduleEditor(staffList)}
-        </section>
-        <section class="card">
-          <h2 style="margin-top:0">สรุปผลประจำเดือน</h2>
-          <div style="overflow-x:auto;">${renderScheduleSummary(staffList)}</div>
-        </section>
-        <section class="card">
-          <h2 style="margin-top:0">เพิ่มพนักงาน</h2>
+      <section class="card">
+        <h2 style="margin-top:0">ตารางเวลาประจำเดือน</h2>
+        <form data-form="schedule-month-form" class="row">
+          <label style="min-width:220px">
+            เดือน
+            <input type="month" name="month" value="${state.timesheetMonth}" />
+          </label>
+          <button class="btn" type="submit">ดู</button>
+        </form>
+        <p class="muted small" style="margin-top:0.5rem">แตะที่ช่องเพื่อวางแผนหรือแก้ไขเวลาเข้า-ออกงานของแต่ละวัน ช่องสีแดงคือวันหยุด</p>
+        <div style="overflow-x:auto; margin-top:0.8rem;">${renderMonthlySchedule(staffList)}</div>
+      </section>
+      <section class="card">
+        <h2 style="margin-top:0">สรุปผลประจำเดือน</h2>
+        <div style="overflow-x:auto;">${renderScheduleSummary(staffList)}</div>
+      </section>
+      <section class="card">
+        <h2 style="margin-top:0">เพิ่มพนักงาน</h2>
           <form data-form="employee-form" class="stack">
             <div class="form-grid">
               <label>
@@ -651,7 +681,6 @@ function renderTimesheet() {
             <p id="employee-form-error" class="error" hidden></p>
           </form>
         </section>
-      ` : ''}
     </div>
   `;
 }
@@ -1140,6 +1169,13 @@ function bindView() {
       handleForm(form.dataset.form, new FormData(form));
     };
   });
+  // Clicking the darkened backdrop itself (not the modal card, which is a
+  // child and would otherwise bubble up to this same click) closes the modal.
+  document.querySelectorAll('.modal-backdrop').forEach((backdrop) => {
+    backdrop.onclick = (event) => {
+      if (event.target === backdrop) handleAction('close-schedule-cell', {});
+    };
+  });
 }
 
 // Auth account creation and the Firestore staff-doc write happen as two
@@ -1286,7 +1322,8 @@ async function handleForm(name, formData) {
   }
 
   if (name === 'schedule-month-form') {
-    if (!roleAtLeast('Manager')) return;
+    // No role gate — this only changes which month is being viewed (an
+    // Employee's own read-only monthly schedule included), it never writes.
     state.timesheetMonth = formData.get('month') || monthISO();
     render();
   }
