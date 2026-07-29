@@ -5,6 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Didi Malatang</title>
     <link rel="stylesheet" href="styles.css" />
+    <link rel="manifest" href="manifest.json" />
+    <link rel="icon" href="logo.jpg" />
+    <!-- iOS Safari ignores manifest.json icons entirely — apple-touch-icon is the
+         only thing that sets the "Add to Home Screen" icon there. -->
+    <link rel="apple-touch-icon" href="logo.jpg" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Didi Malatang" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="theme-color" content="#6e1414" />
   </head>
   <body>
     <div id="login-gate" class="login-gate">

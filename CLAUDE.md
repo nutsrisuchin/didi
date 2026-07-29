@@ -60,18 +60,25 @@ the repo/title still say "Didi Malatang Hub" for clarity, but the **UI itself no
   button for insufficient roles. The UI gating is just UX; `handleAction`'s own check plus the
   Firestore rule are the actual enforcement — treat all three as required, not redundant.
 - There's a minimal modal system: `#modal-host` in `index.html`, a sibling of `#app-root` so it
-  isn't affected by that element's own `hidden` toggling. `render()` sets its `innerHTML` from
-  `renderScheduleModal()` on every render cycle, same as any other view — the modal has no
-  separate render loop of its own, it's just driven by `state.selectedScheduleCell` like
-  everything else is driven by `state`. `bindView()`'s generic `[data-action]` wiring covers
-  buttons inside the modal automatically since it queries the whole document, not just `#view`;
-  the one bit of custom wiring is `.modal-backdrop`'s click handler, which only fires
-  `close-schedule-cell` when `event.target === backdrop` itself (i.e. the darkened area, not a
-  click occurring somewhere inside `.modal-card` and bubbling up) — this is the only place in the
-  app that checks `event.target` rather than relying purely on `data-action` dispatch. Everywhere
-  else in the app still renders inline into `#view` with no modal — this exists specifically
-  because a 31-row schedule grid made "scroll down to an inline editor panel" impractical; don't
-  reach for a modal elsewhere without a similarly concrete reason.
+  isn't affected by that element's own `hidden` toggling. `render()` concatenates the output of
+  every modal-render function (`renderScheduleModal() + renderStaffEditModal()`) into its
+  `innerHTML` on every render cycle, same as any other view — each modal has no separate render
+  loop of its own, it's just driven by its own bit of `state` (`state.selectedScheduleCell`,
+  `state.editingStaffId`) like everything else. In practice at most one produces real markup at a
+  time (nothing stops both being open simultaneously in state, but nothing in the UI drives that
+  either). `bindView()`'s generic `[data-action]` wiring covers buttons inside any modal
+  automatically since it queries the whole document, not just `#view`; the one bit of custom
+  wiring is `.modal-backdrop`'s click handler, which fires whatever action its own
+  `data-close-action` attribute names (`close-schedule-cell` or `close-staff-edit`) only when
+  `event.target === backdrop` itself (i.e. the darkened area, not a click occurring somewhere
+  inside `.modal-card` and bubbling up). **Adding a third modal**: give its backdrop a
+  `data-close-action`, add its own state field, and append its render function's output alongside
+  the other two in `render()` — don't hardcode a single close action in the backdrop wiring again,
+  that was a real bug caught while adding the second modal (every backdrop click closed the
+  schedule-cell modal specifically, regardless of which modal was actually open). Everywhere else
+  in the app still renders inline into `#view` with no modal — this exists specifically because a
+  31-row schedule grid made "scroll down to an inline editor panel" impractical; don't reach for
+  a modal elsewhere without a similarly concrete reason.
 
 ## [Reusable] Firebase Auth/Firestore setup pattern
 
@@ -133,11 +140,17 @@ changing permissions: `render()`'s nav gating, each `handleAction`/`handleForm` 
 - **App Owner**: everything, including changing anyone's role; can't be removed via the UI
   (`renderAdmin` never renders a delete button for the `App Owner` row, and the rule rejects
   it server-side too).
-- **Admin**: manage `staff` (any role except can't touch the App Owner), timesheet, warehouse,
-  checklist, notifications, and the **Financial section** (`/financial` view, `data-role-min="Admin"`
-  on its nav button plus an explicit `render()` gate — see Business logic section below), which
-  is also where **salary/`dailyRate` is viewed and edited** — Admin+ only, deliberately narrower
-  than the rest of `staff` management Admin otherwise has.
+- **Admin**: manage `staff` (any role except can't touch the App Owner — including **editing** an
+  existing member's name/role/employmentType/dailyRate via the Admin page's "แก้ไข" button, which
+  opens `renderStaffEditModal()`; the App Owner row never gets this button, mirroring how it
+  never gets a delete button either), timesheet, warehouse, checklist, notifications, and the
+  **Financial section** (`/financial` view, `data-role-min="Admin"` on its nav button plus an
+  explicit `render()` gate — see Business logic section below), which is also where **salary/
+  `dailyRate` is viewed and edited** — Admin+ only, deliberately narrower than the rest of `staff`
+  management Admin otherwise has. Since the Timesheet view reads live from the same `state.staff`
+  cache via the same `onSnapshot` watcher as everywhere else, an edit made here shows up in
+  Timesheet immediately with no separate sync step — this is just the existing "state cache +
+  onSnapshot" architecture, not a new mechanism.
 - **Manager**: add/remove `Employee`-role staff (from the Timesheet page's own "Remove
   employee" button, not the Admin page — Managers can't reach `/admin` or `/financial` at all),
   mark attendance, plan the monthly schedule grid (see Business logic section below), manage
@@ -213,11 +226,20 @@ changing permissions: `render()`'s nav gating, each `handleAction`/`handleForm` 
   part-time formula and the "full-time pay intentionally unimplemented" deferral; do not
   reintroduce either without checking with the user first, since this is now a live payroll
   calculation people are actually paid from.
-- Pay formula (`calculateDailyPay(dailyRate, lateMinutes, isHoliday)`):
-  `max(0, dailyRate × (isHoliday ? 1.5 : 1) − ceil(lateMinutes/60)×40)`. `isHoliday` comes from
-  `isHolidayDate(date)`, which checks the admin-maintained `holidays` collection (see Data model
-  below) — there is no per-attendance-record checkbox for marking a day as a holiday, it's
-  entirely driven by that date list.
+- Pay formula (`calculateDailyPay(dailyRate, lateMinutes, isHoliday, closingDuty = false)`):
+  `max(0, dailyRate × (isHoliday ? 1.5 : 1) − ceil(lateMinutes/60)×40 + (closingDuty ? 50 : 0))`.
+  `isHoliday` comes from `isHolidayDate(date)`, which checks the admin-maintained `holidays`
+  collection (see Data model below) — there is no per-attendance-record checkbox for marking a
+  day as a holiday, it's entirely driven by that date list. `closingDuty` ("ปิดบิลแทน" — closed
+  the till that day) is the opposite: it **is** a per-attendance-record flag, toggled from the
+  schedule-cell modal's second button (`toggle-closing-duty` action), and the flat +50 THB bonus
+  is added *after* the holiday multiplier, not multiplied by it. Every write path that can touch
+  an existing record's `closingDuty` (`mark-attendance`, `save-schedule-cell`) explicitly reads
+  and re-passes the prior value through — `DB.put` merges rather than overwrites, so silently
+  omitting the field on an unrelated edit (e.g. correcting a clock-in time) would otherwise leave
+  a stale `closingDuty: true` on the doc without its pay bonus actually being recalculated in.
+  `mark-schedule-dayoff` explicitly sets `closingDuty: false` instead (can't be off and closing
+  the till the same day).
 - **Financial section** (`/financial` view in `app.js`, Admin+ only): shows each paid employee's
   *expected salary for a selected calendar month* (`computeExpectedSalary()`), picked via a
   native `<input type="month">` (small built-in calendar icon — **not verified on iOS Safari**,
@@ -299,6 +321,17 @@ Restaurant staff use this on their phones, so these are checked for every new UI
   queries rather than inventing new breakpoints.
 - Elements meant to run fullscreen (PWA/home-screen use) should respect
   `env(safe-area-inset-*)` — see `.login-gate`'s `padding-top`.
+- **Home-screen icon** (`manifest.json` + `<link>`/`<meta>` tags in `index.html`'s `<head>`):
+  Android/Chrome reads the icon from `manifest.json`'s `icons` array; **iOS Safari ignores that
+  entirely** and only looks at `<link rel="apple-touch-icon">` — both are needed, not just one.
+  Both currently point at the same `logo.jpg` with no resized variants (no image-processing tool
+  was available when this was set up), using `"sizes": "any"` in the manifest rather than a
+  specific number like `"192x192"` — declaring an exact size that doesn't match the file's real
+  pixel dimensions risks Chrome silently skipping that icon entry for install-eligibility checks.
+  If real dimensions are ever confirmed (or multiple actual sizes get generated), prefer adding
+  proper `"192x192"`/`"512x512"` entries alongside `"any"` rather than replacing it. This setup
+  only makes the home-screen icon/name correct — there's no service worker, so it's not an
+  installable offline-capable PWA; don't imply otherwise if asked about "installing the app."
 - When genuinely unsure how something behaves on iPhone Safari vs. desktop Chrome (camera
   `capture="environment"` input behavior, viewport height quirks), say so explicitly rather
   than assuming parity. Checklist photo inputs still use
@@ -366,8 +399,10 @@ Storage" note above; images live inline on the docs below as base64 data URLs.
   working"), `clockIn`, `clockOut` (both `null` when `dayOff` is true), `lateMinutes`,
   `workedHours` (display only, doesn't feed pay), `pay` (computed via `calculateDailyPay`, `0`
   when `dayOff`), `isHoliday` (bool, whether `calculateDailyPay` applied the 1.5x multiplier for
-  that date), `updatedBy` (the acting user's Auth uid — set by every write path, see Business
-  logic section above), `createdAt`.
+  that date), `closingDuty` (bool, whether this person closed the till that day — a flat +50 THB
+  add-on already baked into `pay`; always explicitly `true`/`false` on every write, never left to
+  merge-through, see Business logic section above), `updatedBy` (the acting user's Auth uid — set
+  by every write path, see Business logic section above), `createdAt`.
 - **`warehouseItems`**: `category` (free text — no fixed category list, same convention as
   `unit`; the Warehouse view groups items into collapsible sections by this field, falling
   back to `'อื่นๆ'` when unset), `name`, `unit` (free text — no fixed unit list), `quantity`

@@ -1,0 +1,11 @@
+{
+  "name": "Didi Malatang",
+  "short_name": "Didi Malatang",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#fdf3e6",
+  "theme_color": "#6e1414",
+  "icons": [
+    { "src": "logo.jpg", "sizes": "any", "type": "image/jpeg", "purpose": "any" }
+  ]
+}
