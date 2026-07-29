@@ -378,6 +378,8 @@ function render() {
     content.innerHTML = renderTimesheet();
   } else if (state.view === 'warehouse') {
     content.innerHTML = renderWarehouse();
+  } else if (state.view === 'warehouse-analytics') {
+    content.innerHTML = renderWarehouseAnalytics();
   } else if (state.view === 'routines') {
     content.innerHTML = renderRoutines();
   } else if (state.view === 'admin') {
@@ -826,6 +828,56 @@ const STOCK_SEED_DATA = [
   { category: 'อื่นๆ', name: 'เกี๊ยวกุ้งหมูสับ', unit: 'แพ็ค', quantity: 3 }
 ];
 
+// One-time backfill for the Warehouse Analytics tab: historical stock-check
+// readings transcribed from stock_data_1.md (checks from 5/4/69 to 23/7/69 —
+// Thai Buddhist year 69 = 2026 CE), matched to warehouseItems by name. The
+// 26/7 column is deliberately excluded since that value is already the live
+// snapshot captured by STOCK_SEED_DATA/import-stock-seed — importing it again
+// would just add a redundant zero-decline log entry. Items with no historical
+// column in the file at all (e.g. น้ำจับเลี้ยง, first seen on 26/7) have no
+// entry here — there's nothing to backfill. `null` marks a check where the
+// file shows "-"/"—" (item not yet tracked at that point). Footnoted values
+// (mid-period restocks, e.g. "80†") are recorded at their raw post-restock
+// number like every other reading — computeStockInsight already only counts
+// net declines between consecutive logs, so a period that nets an increase
+// because of a mid-period restock is correctly skipped, same limitation the
+// user's own by-hand analysis in stock_data_1.md already accepted.
+const STOCK_HISTORY_DATES = [
+  '2026-04-05', '2026-04-09', '2026-04-14', '2026-04-17', '2026-04-19', '2026-04-23', '2026-04-26', '2026-04-30',
+  '2026-05-03', '2026-05-07', '2026-05-10', '2026-05-14', '2026-05-17', '2026-05-21', '2026-05-24', '2026-05-28', '2026-05-31',
+  '2026-06-04', '2026-06-07', '2026-06-11', '2026-06-14', '2026-06-18', '2026-06-21', '2026-06-25', '2026-06-28',
+  '2026-07-02', '2026-07-05', '2026-07-09', '2026-07-12', '2026-07-16', '2026-07-19', '2026-07-23'
+];
+
+const STOCK_HISTORY_DATA = [
+  { name: 'ฟองเต้าหู้แห้ง แบบแท่ง', readings: [3, 3, 3, 2, 2, 2, 2, 1, 3, 2, 2, 0, 2, 0.5, 0, 2.5, 1, 0.5, 1.5, 1.5, 1, 3, 2, 1.5, 0, 2, 2, 1.1, 1, 3.5, 2, 2] },
+  { name: 'ฟองเต้าหู้แห้ง เส้นเล็ก', readings: [3, 3, 4, 2.5, 2, 2.5, 3, 2, 2, 2, 2, 1, 3, 2, 1.1, 0.5, 2, 1.5, 0.5, 2.2, 2, 1, 0.5, 2, 1.5, 1, 2.5, 2, 1.5, 0.5, 0.1, 2] },
+  { name: 'ฟองเต้าหู้ม้วน/ทอด', readings: [40, 32, 25, 22, 34, 32, 28, 21, 13, 32, 22, 44, 41, 32, 20, 43, 32, 19, 46, 35, 27, 27, 16, 44, 39, 29, 22, 15, 41, 33, 20, 44] },
+  { name: 'บะหมี่ผัก มันม่วง', readings: [38, 32, 13, 5, 43, 30, 21, 18, 8, 80, 74, 64, 53, 37, 25, 15, 12, 61, 45, 38, 28, 14, 10, 80, 68, 61, 58, 45, 31, 19, 68, 49] },
+  { name: 'เส้นหนึบ มันเทศ', readings: [59, 52, 46, 41, 34, 26, 22, 16, 12, 50, 46, 38, 30, 24, 16, 55, 53, 45, 38, 28, 70, 63, 54, 48, 40, 35, 32, 24, 19, 8, 0, 0] },
+  { name: 'เส้นหนึบ ฟักทอง', readings: [11, 57, 49, 41, 34, 25, 19, 12, 7, 50, 36, 27, 20, 11, 4, 40, 42, 32, 24, 17, 55, 47, 38, 25, 16, 56, 52, 32, 21, 5, 0, 0] },
+  { name: 'เส้นหนึบใหญ่', readings: [50, 67, 39, 36, 14, 81, 61, 27, 105, 119, 81, 80, 91, 103, 66, 75, 52, 55, 78, 95, 127, 99, 127, 103, 133, 127, 116, 146, 135, 165, 145, 192] },
+  { name: 'เส้นหนึบกลมเล็ก', readings: [62, 55, 44, 31, 25, 13, 55, 47, 38, 26, 14, 64, 50, 39, 29, 63, 56, 43, 84, 71, 57, 95, 83, 75, 66, 57, 47, 36, 28, 69, 60, 52] },
+  { name: 'เส้นอูด้ง', readings: [39, 27, 15, 9, 35, 24, 16, 39, 30, 20, 13, 33, 21, 14, 38, 23, 20, 27, 22, 8, 22, 37, 23, 7, 23, 11, 26, 13, 2, 11, 23, 6] },
+  { name: 'เส้นดำ รากเฟิร์น', readings: [7, 6, 4, 3, 2, 1, 1, 3, 2, 2, 4, 3, 3, 1, 0, 7, 7, 4, 4, 3, 1, 20, 14, 11, 17, 16, 15, 14, 14, 13, 11, 10] },
+  { name: 'เส้นราเมง', readings: [6, 32, 22, 18, 15, 9, 33, 25, 20, 9, 32, 27, 22, 16, 8, 0, 25, 16, 12, 37, 32, 26, 16, 11, 3, 28, 22, 16, 13, 0, 0, 26] },
+  { name: 'สาหร่ายวากาเมะ', readings: [3, 2, 1, 1.2, 2.5, 1, 1, 3, 2, 2, 2, 1, 3, 3, 2.5, 1.5, 0.9, 2.5, 1.5, 2.5, 1, 3.5, 3, 3, 2, 2, 3, 3, 2.5, 2, 1.5, 0.8] },
+  { name: 'ผักกุ๊งฉ่าย', readings: [3, 4, 4, 4, 3, 3, 3, 2, 3, 1.5, 2, 1, 1, 1.5, 0.5, 0, 0, 7, 6, 3, 1, 17, 16, 14, 13, 12, 11, 10, 10, 9, 9, 8] },
+  { name: 'น้ำหวังเหล่าจี๋', readings: [8, 24, 21, 18, 13, 5, 23, 21, 15, 11, 32, 25, 16, 9, 26, 19, 18, 10, 5, 23, 16, 10, 2, 48, 44, 45, 33, 22, 22, 13, 7, 2] },
+  { name: 'น้ำฟักเขียว', readings: [7, 28, 19, 16, 13, 9, 33, 32, 31, 29, 27, 25, 23, 20, 17, 13, 13, 10, 33, 29, 23, 19, 15, 12, 9, 28, 26, 23, 20, 18, 17, 14] },
+  { name: 'นมแดง', readings: [10, 7, 0, 0, 10, 2, 10, 7, 5, 13, 6, 12, 9, 1, 13, 11, 11, 7, 0, 19, 14, 10, 7, 28, 25, 22, 20, 17, 14, 7, 6, 29] },
+  { name: 'ชานมไต้หวัน', readings: [6, 1, 10, 7, 6, 3, 17, 15, 9, 5, 0, 30, 28, 27, 22, 11, 15, 8, 18, 18, 16, 16, 12, 10, 24, 21, 20, 20, 17, 7, 5, 15] },
+  { name: 'ชาเขียวบ้วย', readings: [null, null, null, null, null, null, null, null, null, null, null, null, null, 5, 1, 0, null, 0, null, null, null, 11, 11, 25, 24, 20, 18, 16, 15, 11, 8, 2] },
+  { name: 'ถ้วยน้ำจิ้ม 2 ออนซ์', readings: [23, 15, 28, 23, 25, 38, 36, 35, 52, 45, 39, 33, 27, 43, 36, 42, 27, 34, 37, 17, 25, 23, 16, 13, 12, 53, 48, 44, 42, 32, 31, 27] },
+  { name: 'ถ้วยน้ำจิ้ม 1 ออนซ์', readings: [53, 16, 39, 54, 53, 50, 39, 46, 47, 47, 43, 42, 39, 36, 44, 34, 26, 24, 27, 25, 24, 21, 20, 18, 16, 15, 13, 11, 9, 46, 50, 54] },
+  { name: 'กระดาษทิชชู่แบบแขวน', readings: [10, 8, 7, 6, 6, 10, 9, 8, 7, 6, 5, 4, 6, 7, 6, 4, 9, 8, 7, 16, 14, 11, 9, 7, 5, 2, 12, 10, 7, 14, 9, 5] },
+  { name: 'กระดาษทิชชู่อันเล็ก', readings: [13, 10, 5, 2, 0, 38, 35, 32, 27, 22, 18, 13, 10, 40, 42, 31, 28, 25, 20, 51, 43, 37, 33, 29, 25, 23, 19, 15, 12, 44, 40, 36] },
+  { name: 'กระดาษใบเสร็จ pos', readings: [29, 29, 10, 8, 7, 26, 13, 10, 8, 56, 54, 50, 30, 36, 44, 30, 30, 26, 25, 20, 18, 14, 12, 13, 9, 6, 14, 10, 10, 6, 4, 12] },
+  { name: 'กระดาษใบเสร็จ grab 57x40', readings: [16, 13, 27, 26.5, 27, 14, 25, 25, 24, 22, 22, 20, 18, 14, 9, 14, 14, 13, 10, 10, 10, 8, 8, 7, 6, 8, 58, 57, 56, 55, 55, 54] },
+  { name: 'ถ้วยอาหารพลาสติก 1,000ml', readings: [16, 14, 11, 5, 2, 36, 32, 27, 29, 23, 17, 18, 20, 8, 9, 21, 18, 26, 23, 15, 21, 20, 14, 15, 16, 26, 23, 19, 18, 13, 15, 9] },
+  { name: 'เกี๊ยวกุ้งหมูสับ', readings: [3, 5, 3, 2, 1, 0, 3, 1, 2, 4, 3, 4, 3, 11, 11, 9, 6, 11, 11, 10, 8, 8, 8, 7, 7, 6, 6, 5, 5, 4, 4, 3] }
+];
+
 // Same methodology the user already uses by hand in their own stock-check
 // notes: only count periods where quantity actually went down (a restock
 // between checks would otherwise look like negative usage), average that
@@ -992,6 +1044,68 @@ function renderWarehouse() {
       <section class="card">
         <h2 style="margin-top:0">ใบเช็คสต็อก</h2>
         <div class="stock-sheet">${sections || '<p class="muted">ยังไม่มีสินค้า</p>'}</div>
+      </section>
+    </div>
+  `;
+}
+
+// Same as computeStockInsight, but every item instead of just the ones already
+// low/urgent — this whole tab exists to show the full picture (everyone's
+// days-left estimate side by side), where the Warehouse tab's own "restock
+// priorities" section deliberately only surfaces the subset that needs
+// attention right now.
+function renderWarehouseAnalytics() {
+  const canManage = roleAtLeast('Manager');
+  // A one-time backfill guard, same idea as import-stock-seed's "only show
+  // when the warehouse is empty" check — here, "has any log dated before the
+  // live seed import" stands in for "history already imported," since there's
+  // no separate flag/document tracking that.
+  const historyImported = state.warehouseLogs.some((log) => log.recordedAt < '2026-05-01');
+
+  const insights = state.warehouseItems
+    .map((item) => ({ item, ...computeStockInsight(item) }))
+    .sort((a, b) => {
+      if (a.hasData && b.hasData) return a.daysLeft - b.daysLeft;
+      if (a.hasData !== b.hasData) return a.hasData ? -1 : 1;
+      return a.item.name.localeCompare(b.item.name, 'th');
+    });
+
+  const rows = insights.map(({ item, hasData, usagePerDay, daysLeft, reorderPoint, suggestedOrder }) => {
+    const urgent = hasData && daysLeft <= 3;
+    const warn = hasData && !urgent && daysLeft <= 14;
+    return `
+      <div class="list-item">
+        <div>
+          <strong>${item.name}</strong>
+          <div class="muted">
+            คงเหลือ ${item.quantity} ${item.unit}
+            ${hasData
+              ? ` · ใช้วันละ ~${usagePerDay.toFixed(1)} ${item.unit} · จุดสั่งซื้อ ~${reorderPoint.toFixed(1)} ${item.unit}`
+              : ' · ยังไม่มีข้อมูลเพียงพอในการคำนวณ'}
+          </div>
+          ${hasData && suggestedOrder > 0 ? `<div class="small">แนะนำสั่งเพิ่ม ~${Math.ceil(suggestedOrder)} ${item.unit}</div>` : ''}
+        </div>
+        ${hasData
+          ? `<span class="badge ${urgent ? 'overdue' : ''}">${warn || urgent ? `เหลืออีก ${Math.max(0, Math.floor(daysLeft))} วัน` : 'สต็อกเพียงพอ'}</span>`
+          : '<span class="badge">ไม่มีข้อมูล</span>'}
+      </div>
+    `;
+  }).join('');
+
+  return `
+    <div class="grid">
+      <section class="card">
+        <h2 style="margin-top:0">วิเคราะห์คลังสินค้า</h2>
+        <p class="muted">
+          คำนวณอัตราการใช้ต่อวันของแต่ละสินค้าจากประวัติการอัปเดตจำนวน แล้วประเมินว่าอีกกี่วันสินค้าจะหมด
+          พร้อมจุดสั่งซื้อ (lead time 7 วัน + สำรอง 30%) และปริมาณแนะนำในการสั่งเพิ่ม (พอใช้ 14 วัน)
+        </p>
+        ${canManage && !historyImported ? `
+          <button class="btn secondary" data-action="import-stock-history">นำเข้าประวัติสต็อกเก่า (เม.ย.-ก.ค. 69)</button>
+        ` : ''}
+      </section>
+      <section class="card">
+        <div class="list">${rows || '<p class="muted">ยังไม่มีสินค้าในคลัง</p>'}</div>
       </section>
     </div>
   `;
@@ -1709,6 +1823,31 @@ async function handleAction(action, data) {
       upsertLocal('warehouseLogs', log);
     }
     await pushNotification('นำเข้าข้อมูลสต็อกแล้ว', `นำเข้าสินค้า ${STOCK_SEED_DATA.length} รายการจากใบเช็คสต็อกวันที่ 26/7/69`);
+    render();
+    return;
+  }
+
+  if (action === 'import-stock-history') {
+    if (!roleAtLeast('Manager')) return;
+    let importedCount = 0;
+    for (const entry of STOCK_HISTORY_DATA) {
+      const item = state.warehouseItems.find((candidate) => candidate.name === entry.name);
+      if (!item) continue;
+      for (let i = 0; i < STOCK_HISTORY_DATES.length; i++) {
+        const quantity = entry.readings[i];
+        if (quantity === null || quantity === undefined) continue;
+        const log = {
+          id: DB.uid('wlog'),
+          itemId: item.id,
+          quantity,
+          recordedAt: new Date(`${STOCK_HISTORY_DATES[i]}T00:00:00.000Z`).toISOString()
+        };
+        await DB.put('warehouseLogs', log);
+        upsertLocal('warehouseLogs', log);
+        importedCount += 1;
+      }
+    }
+    await pushNotification('นำเข้าประวัติสต็อกแล้ว', `นำเข้าประวัติการเช็คสต็อก ${importedCount} รายการ (เม.ย.-ก.ค. 69) เพื่อคำนวณอัตราการใช้ย้อนหลัง`);
     render();
     return;
   }

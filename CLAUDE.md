@@ -464,20 +464,48 @@ Storage" note above; images live inline on the docs below as base64 data URLs.
   the just-typed number, making a rejected write look locally successful. Now it `alert()`s the
   raw error message and always re-renders to show the true saved value.
 - **`warehouseLogs`** (append-only, one doc per quantity snapshot — written whenever an item is
-  created, its quantity is updated, or the stock-sheet seed imports it): `itemId`, `quantity`,
-  `recordedAt`. This is the only history the app keeps of stock levels over time; it drives the
-  Warehouse view's "Restock priorities" section via `computeStockInsight(item)`, which mirrors
-  the usage-rate methodology the user already used by hand in `stock_data_1.md` — average daily
-  usage is `Σ(declines between consecutive logs) / Σ(days over those same declining periods)`
-  (periods where quantity went *up*, i.e. a restock, are excluded so they don't read as negative
-  usage), reorder point is `usagePerDay × 7 × 1.3`, suggested order quantity is
-  `usagePerDay × 14 − currentQuantity`. Needs at least two log entries with an actual decline
-  between them to produce a rate — until then `computeStockInsight` returns `{ hasData: false }`
-  and the item is excluded from the priority list (shown instead as a "not enough data yet"
-  count). The Home page's "Warehouse health" card (`.card.clickable`, `data-action="nav-warehouse"`)
-  navigates straight into this section rather than opening a modal — a modal now exists elsewhere
-  in the app (see the modal system note above) but wasn't the right fit here, since this is "go
-  look at a whole page of detail," not "edit one small thing in place."
+  created, its quantity is updated, the stock-sheet seed imports it, or the stock-history backfill
+  runs — see below): `itemId`, `quantity`, `recordedAt`. This is the only history the app keeps of
+  stock levels over time; it drives `computeStockInsight(item)`, which mirrors the usage-rate
+  methodology the user already used by hand in `stock_data_1.md` — average daily usage is
+  `Σ(declines between consecutive logs) / Σ(days over those same declining periods)` (periods
+  where quantity went *up*, i.e. a restock, are excluded so they don't read as negative usage),
+  reorder point is `usagePerDay × 7 × 1.3`, suggested order quantity is `usagePerDay × 14 −
+  currentQuantity`. Needs at least two log entries with an actual decline between them to produce
+  a rate — until then `computeStockInsight` returns `{ hasData: false }`.
+  - The Warehouse tab's own "Restock priorities" section only surfaces the subset of items
+    that's already low/urgent (excluded entirely if `!hasData`, shown as a "not enough data yet"
+    count instead). The Home page's "Warehouse health" card (`.card.clickable`,
+    `data-action="nav-warehouse"`) navigates straight into this section rather than opening a
+    modal — a modal now exists elsewhere in the app (see the modal system note above) but wasn't
+    the right fit here, since this is "go look at a whole page of detail," not "edit one small
+    thing in place."
+  - **`renderWarehouseAnalytics()`** (nav button "วิเคราะห์คลังสินค้า", `state.view ===
+    'warehouse-analytics'`) is a separate, dedicated tab that runs `computeStockInsight` over
+    *every* item, not just the low/urgent ones — sorted soonest-to-run-out first, `!hasData` items
+    last. Visible to every signed-in role, same as the rest of Warehouse (not Manager+ gated) —
+    seeing the analysis isn't sensitive, only the backfill button below is gated. Each row shows
+    current quantity, usage/day, reorder point, suggested order, and a days-left badge (or "ไม่มี
+    ข้อมูล" if `!hasData`).
+  - **`STOCK_HISTORY_DATES`/`STOCK_HISTORY_DATA`** (`app.js`, near `STOCK_SEED_DATA`) is a one-time
+    backfill dataset transcribed from `stock_data_1.md`'s 32 historical stock-check columns
+    (5/4/69–23/7/69 — Thai Buddhist year 69 = 2026 CE — matched to `warehouseItems` by name, `null`
+    where the file shows "-"/"—" for an item not yet tracked at that check). The `26/7` column is
+    deliberately excluded since it's already the live snapshot captured by
+    `STOCK_SEED_DATA`/`import-stock-seed` — backfilling it again would just add a redundant
+    zero-decline log. Items with no historical column at all (e.g. น้ำจับเลี้ยง, first seen on
+    26/7) have no entry — nothing to backfill. Footnoted values in the source file (mid-period
+    restocks, e.g. `80†`) are recorded at their raw post-restock number like any other reading;
+    `computeStockInsight`'s existing decline-only logic already skips a period that nets an
+    increase because of a mid-period restock, same limitation the user's own by-hand analysis in
+    `stock_data_1.md` already accepted — don't try to special-case the footnoted periods to
+    recover that "true" usage figure without checking with the user first, since it would mean
+    hand-encoding ~15 one-off overrides rather than a uniform rule. The `import-stock-history`
+    action (Manager+ only, like `import-stock-seed`) writes one `warehouseLogs` doc per
+    non-`null` historical reading. Its guard for "already imported, hide the button" is
+    `state.warehouseLogs.some((log) => log.recordedAt < '2026-05-01')` — there's no separate
+    flag/document tracking this, same trick `import-stock-seed` uses (checking
+    `state.warehouseItems.length === 0`) rather than adding new state just for a one-time gate.
 - **`routines`** (user-facing label is "Checklist" throughout the UI — the collection name and
   internal `state.view === 'routines'` were kept as-is to avoid a Firestore-path/rules churn for
   what is otherwise a pure relabel+redesign): `name`, `description` (short free-text summary),
