@@ -364,6 +364,23 @@ Restaurant staff use this on their phones, so these are checked for every new UI
 - **The GitHub Pages CDN caches aggressively** — a push can take longer than expected to be
   visible; verify via `curl -sI <url> | grep -Ei 'last-modified|age'` against the live URL
   before assuming a just-shipped fix is broken.
+- **Home-screen (standalone) icons cache far more stubbornly than a normal browser tab.** There's
+  no service worker in this app (see the manifest note above — it's a bookmark-style shortcut,
+  not an installable offline PWA), so staleness here is just the OS webview holding onto the old
+  `index.html`/`app.js`/`styles.css` — but a standalone window has no visible reload/refresh
+  gesture, so it can keep showing a stale build well past the page's own `Cache-Control: max-age`
+  until the app is fully force-quit (swiped away in the app switcher, not just backgrounded) and
+  reopened. If a user reports "it works in the browser but not from the home screen icon," that's
+  the first thing to have them try — don't assume the deploy itself is broken; confirm with the
+  `curl -sI` check above first. `index.html`'s `<link>`/`<script>` tags for `styles.css`, `db.js`,
+  `app.js`, and `firebase-config.js` carry a manually-bumped `?v=YYYYMMDD` query string precisely
+  so a fresh `index.html` fetch (which does eventually happen, even from a stale home-screen
+  session) pulls fresh copies of everything else too rather than serving old cached JS/CSS
+  alongside a new HTML shell. **Bump this date string on every push that changes `app.js`,
+  `db.js`, or `styles.css`** — it's a manual step (no build tool generates a content hash here),
+  and forgetting it silently reintroduces the desync this was added to prevent. It doesn't fully
+  solve deep webview caching of `index.html` itself, though — force-close/reopen remains the
+  reliable fix for that specific case.
 - `firebase-config.js` is safe to commit — none of its values are secret; access control is
   Firestore Security Rules + the PIN auth layer, not hiding this file.
 - `firestore.rules` is **not** auto-deployed by anything in this repo (no Firebase CLI/CI wired
