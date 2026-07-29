@@ -15,6 +15,7 @@ const state = {
   holidays: [],
   warehouseLogs: [],
   collapsedStockCategories: new Set(),
+  warehouseEditMode: false,
   financialMonth: monthISO(),
   timesheetMonth: monthISO(),
   selectedScheduleCell: null,
@@ -872,6 +873,7 @@ function groupWarehouseItemsByCategory() {
 
 function renderWarehouse() {
   const canManage = roleAtLeast('Manager');
+  const editMode = canManage && state.warehouseEditMode;
   const categories = Array.from(new Set(state.warehouseItems.map((item) => item.category || 'อื่นๆ')));
   const categoryOptions = categories.map((category) => `<option value="${category}"></option>`).join('');
   const groups = groupWarehouseItemsByCategory();
@@ -911,8 +913,10 @@ function renderWarehouse() {
         <div class="stock-manage">
           <input class="mini-input" type="number" min="0" step="any" value="${item.quantity}" data-quantity-for="${item.id}" />
           <button class="btn secondary" data-action="update-item-quantity" data-id="${item.id}">อัปเดต</button>
-          <input type="file" accept="image/*" data-image-for="${item.id}" />
-          <button class="btn secondary" data-action="update-item-photo" data-id="${item.id}">${item.imageUrl ? 'เปลี่ยนรูป' : 'เพิ่มรูป'}</button>
+          ${editMode ? `
+            <input type="file" accept="image/*" data-image-for="${item.id}" />
+            <button class="btn secondary" data-action="update-item-photo" data-id="${item.id}">${item.imageUrl ? 'เปลี่ยนรูป' : 'เพิ่มรูป'}</button>
+          ` : ''}
           <button class="btn danger" data-action="delete-item" data-id="${item.id}">ลบ</button>
         </div>
       ` : ''}
@@ -937,14 +941,22 @@ function renderWarehouse() {
 
   return `
     <div class="grid">
+      ${canManage ? `
+        <section class="card">
+          <div class="row" style="justify-content:space-between">
+            <h2 style="margin:0">คลังสินค้า</h2>
+            <button class="btn ${editMode ? 'secondary' : ''}" data-action="toggle-warehouse-edit-mode">${editMode ? 'เสร็จสิ้นการแก้ไข' : 'แก้ไขคลังสินค้า'}</button>
+          </div>
+        </section>
+      ` : ''}
       <section class="card">
         <h2 style="margin-top:0">ลำดับความสำคัญในการเติมสต็อก</h2>
         ${priorityItems.length ? `<div class="list">${priorityRows}</div>` : '<p class="muted">ทุกรายการมีสต็อกเพียงพอในตอนนี้</p>'}
         ${noDataCount ? `<p class="small muted" style="margin-top:0.6rem">${noDataCount} รายการยังไม่มีข้อมูลเพียงพอในการคำนวณ — ระบบจะเริ่มคำนวณอัตราการใช้หลังมีการอัปเดตจำนวนอย่างน้อย 2 ครั้ง</p>` : ''}
       </section>
-      ${canManage ? `
+      ${editMode ? `
         <section class="card">
-          <h2 style="margin-top:0">คลังสินค้า</h2>
+          <h2 style="margin-top:0">เพิ่มสินค้า</h2>
           <form data-form="item-form" class="stack">
             <div class="form-grid">
               <label>
@@ -973,7 +985,7 @@ function renderWarehouse() {
           </form>
         </section>
       ` : ''}
-      ${canManage && state.warehouseItems.length === 0 ? `
+      ${editMode && state.warehouseItems.length === 0 ? `
         <section class="card">
           <h2 style="margin-top:0">นำเข้าข้อมูลสต็อกเก่า</h2>
           <p class="muted">นำเข้าสินค้า ${STOCK_SEED_DATA.length} รายการและหมวดหมู่จากใบเช็คสต็อกล่าสุด (26/7/69) ครั้งเดียว — ปุ่มนี้จะแสดงเฉพาะตอนที่คลังสินค้ายังว่างอยู่</p>
@@ -1677,6 +1689,13 @@ async function handleAction(action, data) {
     } else {
       state.collapsedStockCategories.add(data.category);
     }
+    render();
+    return;
+  }
+
+  if (action === 'toggle-warehouse-edit-mode') {
+    if (!roleAtLeast('Manager')) return;
+    state.warehouseEditMode = !state.warehouseEditMode;
     render();
     return;
   }

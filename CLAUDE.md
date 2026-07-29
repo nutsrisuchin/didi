@@ -418,6 +418,14 @@ Storage" note above; images live inline on the docs below as base64 data URLs.
   (decimal, e.g. `1.5` for a partially-used pack), `imageUrl` (compressed base64 JPEG data URL,
   or `''` — settable at creation, and separately addable/replaceable later per-item via the
   Warehouse view's "เพิ่มรูป"/"เปลี่ยนรูป" control, `update-item-photo` action), `createdAt`.
+  The Warehouse screen has a Manager+-only **`state.warehouseEditMode`** toggle
+  ("แก้ไขคลังสินค้า"/"เสร็จสิ้นการแก้ไข") that hides, by default, the "เพิ่มสินค้า" create-item
+  form, the one-time stock-sheet import section, and each item's photo-upload control — this was
+  a deliberate declutter request; **quantity update and delete stay visible unconditionally**
+  whenever `canManage` is true, since those are the frequent daily-use actions and only the
+  occasional setup/photo actions were asked to be tucked away. If asked to also hide/reveal
+  quantity or delete behind this toggle, that's a scope change to confirm, not an inconsistency
+  to "fix" silently.
 - **`warehouseLogs`** (append-only, one doc per quantity snapshot — written whenever an item is
   created, its quantity is updated, or the stock-sheet seed imports it): `itemId`, `quantity`,
   `recordedAt`. This is the only history the app keeps of stock levels over time; it drives the
