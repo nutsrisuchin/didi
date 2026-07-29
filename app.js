@@ -1720,11 +1720,21 @@ async function handleAction(action, data) {
     const input = document.querySelector(`[data-quantity-for="${data.id}"]`);
     const quantity = Math.max(0, Number(input?.value ?? item.quantity));
     const record = { ...item, quantity };
-    await DB.put('warehouseItems', record);
-    upsertLocal('warehouseItems', record);
-    const log = { id: DB.uid('wlog'), itemId: item.id, quantity, recordedAt: nowISO() };
-    await DB.put('warehouseLogs', log);
-    upsertLocal('warehouseLogs', log);
+    try {
+      await DB.put('warehouseItems', record);
+      upsertLocal('warehouseItems', record);
+      const log = { id: DB.uid('wlog'), itemId: item.id, quantity, recordedAt: nowISO() };
+      await DB.put('warehouseLogs', log);
+      upsertLocal('warehouseLogs', log);
+      await pushNotification('อัปเดตจำนวนสินค้า', `${state.currentStaff?.name || ''} ปรับจำนวน ${item.name} เป็น ${quantity} ${item.unit}`);
+    } catch (error) {
+      // Without this, a rejected write (e.g. stale Firestore console rules)
+      // failed silently: render() never ran, so the input kept showing the
+      // just-typed number even though nothing was actually saved — looked
+      // like it worked locally but never reached Firestore for anyone else.
+      console.error('update-item-quantity failed', error);
+      alert('บันทึกจำนวนไม่สำเร็จ: ' + (error.message || error));
+    }
     render();
     return;
   }

@@ -437,7 +437,15 @@ Storage" note above; images live inline on the docs below as base64 data URLs.
   don't widen delete or add to Employee without checking with the user first, since the ask was
   specifically "update but not add or delete." If asked to also hide/reveal quantity behind the
   edit-mode toggle, or to widen/narrow who can delete, that's a scope change to confirm, not an
-  inconsistency to "fix" silently.
+  inconsistency to "fix" silently. `update-item-quantity` pushes a notification naming the acting
+  user, item, and new quantity (previously this action was the one write path in the whole app
+  with no notification at all — every other mutation already had one, see the Notifications
+  section below) and wraps its two `DB.put` calls in try/catch: an unhandled rejection here
+  (e.g. a permission-denied error from `firestore.rules` not yet being the current version — see
+  the GitHub Pages deployment section on `firestore.rules` never auto-deploying) used to fail
+  completely silently, since `render()` never ran afterward but the `<input>` still visibly held
+  the just-typed number, making a rejected write look locally successful. Now it `alert()`s the
+  raw error message and always re-renders to show the true saved value.
 - **`warehouseLogs`** (append-only, one doc per quantity snapshot — written whenever an item is
   created, its quantity is updated, or the stock-sheet seed imports it): `itemId`, `quantity`,
   `recordedAt`. This is the only history the app keeps of stock levels over time; it drives the
