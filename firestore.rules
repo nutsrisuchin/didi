@@ -57,12 +57,19 @@ service cloud.firestore {
 
     match /warehouseItems/{itemId} {
       allow read: if isSignedIn();
-      allow write: if roleAtLeast('Manager');
+      // Any signed-in staff can update an item (used for the quantity-restock
+      // control everyone sees); only Manager+ create/delete items.
+      allow create, delete: if roleAtLeast('Manager');
+      allow update: if isSignedIn();
     }
 
     match /warehouseLogs/{logId} {
       allow read: if isSignedIn();
-      allow write: if roleAtLeast('Manager');
+      // Written alongside every warehouseItems quantity update, including by
+      // Employees now — see above. Append-only in practice (no update/delete
+      // call site), so those stay Manager+ as a safe default.
+      allow create: if isSignedIn();
+      allow update, delete: if roleAtLeast('Manager');
     }
 
     match /routines/{routineId} {

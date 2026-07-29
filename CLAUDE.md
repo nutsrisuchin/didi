@@ -178,8 +178,10 @@ changing permissions: `render()`'s nav gating, each `handleAction`/`handleForm` 
   quick-mark panel and no editable cells (`renderMonthlySchedule(staffList, false)` renders plain
   `<span>`s instead of buttons). No pay/salary figure is shown here regardless of who's viewing —
   `renderMonthlySchedule` only ever displays clock-in/out times or "หยุด", never `pay`, so there
-  was nothing to gate when this view was widened from "just yourself" to "everyone." Read-only
-  everywhere else.
+  was nothing to gate when this view was widened from "just yourself" to "everyone." On
+  Warehouse, can update an item's quantity (the "อัปเดต" control next to each item) but cannot
+  add, delete, or photo-upload an item — see the Data model section's `warehouseItems` entry.
+  Read-only everywhere else.
 - A Manager creating a new `staff` doc is restricted server-side to `role in ['Employee',
   'Manager'] && dailyRate == 0` (`firestore.rules`) — without the role split a Manager could
   craft a raw Firestore write to self-promote to Admin/Owner via the same "create" permission
@@ -426,11 +428,16 @@ Storage" note above; images live inline on the docs below as base64 data URLs.
   The Warehouse screen has a Manager+-only **`state.warehouseEditMode`** toggle
   ("แก้ไขคลังสินค้า"/"เสร็จสิ้นการแก้ไข") that hides, by default, the "เพิ่มสินค้า" create-item
   form, the one-time stock-sheet import section, and each item's photo-upload control — this was
-  a deliberate declutter request; **quantity update and delete stay visible unconditionally**
-  whenever `canManage` is true, since those are the frequent daily-use actions and only the
-  occasional setup/photo actions were asked to be tucked away. If asked to also hide/reveal
-  quantity or delete behind this toggle, that's a scope change to confirm, not an inconsistency
-  to "fix" silently.
+  a deliberate declutter request; **quantity update stays visible unconditionally to every
+  signed-in role, including Employee** (`update-item-quantity` only checks `roleAtLeast('Employee')`
+  — effectively "any logged-in staff" — both client-side and in `firestore.rules`, since updating
+  the count on hand is a frequent daily task, not a management action), while **delete stays
+  Manager+ only** (`canManage`), same as add/photo-upload. This was a deliberate split: Employees
+  can correct/update stock counts but cannot add new items, upload item photos, or remove items —
+  don't widen delete or add to Employee without checking with the user first, since the ask was
+  specifically "update but not add or delete." If asked to also hide/reveal quantity behind the
+  edit-mode toggle, or to widen/narrow who can delete, that's a scope change to confirm, not an
+  inconsistency to "fix" silently.
 - **`warehouseLogs`** (append-only, one doc per quantity snapshot — written whenever an item is
   created, its quantity is updated, or the stock-sheet seed imports it): `itemId`, `quantity`,
   `recordedAt`. This is the only history the app keeps of stock levels over time; it drives the

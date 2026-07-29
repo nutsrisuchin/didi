@@ -908,17 +908,15 @@ function renderWarehouse() {
         <span class="stock-qty">${item.quantity}</span>
         <span class="stock-unit">${item.unit}</span>
       </div>
-      ${canManage ? `
-        <div class="stock-manage">
-          <input class="mini-input" type="number" min="0" step="any" value="${item.quantity}" data-quantity-for="${item.id}" />
-          <button class="btn secondary" data-action="update-item-quantity" data-id="${item.id}">อัปเดต</button>
-          ${editMode ? `
-            <input type="file" accept="image/*" data-image-for="${item.id}" />
-            <button class="btn secondary" data-action="update-item-photo" data-id="${item.id}">${item.imageUrl ? 'เปลี่ยนรูป' : 'เพิ่มรูป'}</button>
-          ` : ''}
-          <button class="btn danger" data-action="delete-item" data-id="${item.id}">ลบ</button>
-        </div>
-      ` : ''}
+      <div class="stock-manage">
+        <input class="mini-input" type="number" min="0" step="any" value="${item.quantity}" data-quantity-for="${item.id}" />
+        <button class="btn secondary" data-action="update-item-quantity" data-id="${item.id}">อัปเดต</button>
+        ${canManage && editMode ? `
+          <input type="file" accept="image/*" data-image-for="${item.id}" />
+          <button class="btn secondary" data-action="update-item-photo" data-id="${item.id}">${item.imageUrl ? 'เปลี่ยนรูป' : 'เพิ่มรูป'}</button>
+        ` : ''}
+        ${canManage ? `<button class="btn danger" data-action="delete-item" data-id="${item.id}">ลบ</button>` : ''}
+      </div>
     `).join('');
 
     return `
@@ -1716,7 +1714,7 @@ async function handleAction(action, data) {
   }
 
   if (action === 'update-item-quantity') {
-    if (!roleAtLeast('Manager')) return;
+    if (!roleAtLeast('Employee')) return;
     const item = state.warehouseItems.find((entry) => entry.id === data.id);
     if (!item) return;
     const input = document.querySelector(`[data-quantity-for="${data.id}"]`);
