@@ -2023,6 +2023,16 @@ async function handleAction(action, data) {
     const employmentType = document.querySelector('#staff-edit-employment-type')?.value || '';
     const dailyRateInput = document.querySelector('#staff-edit-daily-rate')?.value;
     if (!name || !role) return;
+    // dailyRate is only meaningful when employmentType is set (see CLAUDE.md — Owner/Admin
+    // accounts intentionally have employmentType:'' and dailyRate:null). Without this check,
+    // typing a rate while leaving ประเภทการจ้างงาน at "ไม่มี" silently discarded it as null —
+    // a real bug hit when editing a Employee/Manager account whose employmentType was never
+    // set at creation (e.g. created via this same page's "Add account" form, which also
+    // defaults that dropdown to "ไม่มี").
+    if (!employmentType && Number(dailyRateInput) > 0) {
+      alert('กรุณาเลือกประเภทการจ้างงาน (เต็มเวลา/พาร์ทไทม์) ก่อน ไม่เช่นนั้นค่าจ้างต่อวันจะไม่ถูกบันทึก');
+      return;
+    }
     const dailyRate = employmentType ? Math.max(0, Number(dailyRateInput ?? person.dailyRate ?? 0)) : null;
     const record = { ...person, name, role, employmentType, dailyRate };
     await DB.put('staff', record);

@@ -153,6 +153,16 @@ changing permissions: `render()`'s nav gating, each `handleAction`/`handleForm` 
   existing member's name/role/employmentType/dailyRate via the Admin page's "แก้ไข" button, which
   opens `renderStaffEditModal()`; the App Owner row never gets this button, mirroring how it
   never gets a delete button either), timesheet, warehouse, checklist, notifications, and the
+  `save-staff-edit` handler force-writes `dailyRate: null` whenever `employmentType` is empty
+  (mirrors the create-time convention that only paid staff have a rate — see `staff` in the Data
+  model section below), which means **typing a rate while leaving ประเภทการจ้างงาน at "ไม่มี" used
+  to silently discard it** — a real bug hit when an Employee/Manager account had never had its
+  employment type set (e.g. created via this same page's "Add account" form, which also defaults
+  that dropdown to "ไม่มี", so an Employee-role account can end up with no employmentType at
+  creation). Now guarded: entering a nonzero rate with employmentType still empty shows an alert
+  and aborts the save instead of writing `null`. If a staff row on the Admin page is missing its
+  "· เต็มเวลา/พาร์ทไทม์ · ฿.../วัน" line entirely, that's the tell — its `employmentType` is `''`,
+  fix it by setting employment type and rate together in the same edit, not just the rate alone.
   **Financial section** (`/financial` view, `data-role-min="Admin"` on its nav button plus an
   explicit `render()` gate — see Business logic section below), which is also where **salary/
   `dailyRate` is viewed and edited** — Admin+ only, deliberately narrower than the rest of `staff`
