@@ -1198,11 +1198,7 @@ function renderRoutines() {
             </label>
             <label>
               ช่วงเวลา (ถ้ามี)
-              <select name="timeOfDay">
-                <option value="">ไม่ระบุ</option>
-                <option value="before-open">ก่อนเปิดร้าน</option>
-                <option value="after-close">หลังปิดร้าน</option>
-              </select>
+              <input type="time" name="timeOfDay" />
             </label>
             <label>
               คำอธิบาย

@@ -521,8 +521,14 @@ Storage" note above; images live inline on the docs below as base64 data URLs.
   what is otherwise a pure relabel+redesign): `name`, `description` (short free-text summary),
   `detail` (longer free-text instructions), `subtasks` (array of `{id, text}`, parsed from a
   one-line-per-subtask textarea on the create form — no per-definition "done" state, since
-  that's re-ticked fresh on every completion), `timeOfDay` (`''`/`'before-open'`/`'after-close'`
-  — a purely informational tag shown as a badge, doesn't affect scheduling), `lastInspectedAt`,
+  that's re-ticked fresh on every completion), `timeOfDay` (a free `HH:MM` string from an
+  `<input type="time">` on the create form, or `''` if left blank — a purely informational tag
+  shown as a badge, doesn't affect scheduling/due-status logic at all, just when in the day
+  someone's meant to do it. Older routines created before this field became a time picker may
+  still hold the original two categorical values, `'before-open'`/`'after-close'` —
+  `TIME_OF_DAY_LABEL_TH` translates those specifically for display; any other value (i.e. every
+  new `HH:MM` reading) falls through to being shown as-is, which is already the correct display
+  for a time string, so no migration of old records was needed), `lastInspectedAt`,
   `lastInspectedImageUrl` (persists across completions — only overwritten when a report attaches
   a new photo), `createdAt`, and **two mutually-exclusive ways to express recurrence**:
   - `frequencyDays` (number) — the original "every N days" model, due when
