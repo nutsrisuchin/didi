@@ -61,19 +61,20 @@ the repo/title still say "Didi Malatang Hub" for clarity, but the **UI itself no
   Firestore rule are the actual enforcement — treat all three as required, not redundant.
 - There's a minimal modal system: `#modal-host` in `index.html`, a sibling of `#app-root` so it
   isn't affected by that element's own `hidden` toggling. `render()` concatenates the output of
-  every modal-render function (`renderScheduleModal() + renderStaffEditModal()`) into its
-  `innerHTML` on every render cycle, same as any other view — each modal has no separate render
-  loop of its own, it's just driven by its own bit of `state` (`state.selectedScheduleCell`,
-  `state.editingStaffId`) like everything else. In practice at most one produces real markup at a
-  time (nothing stops both being open simultaneously in state, but nothing in the UI drives that
-  either). `bindView()`'s generic `[data-action]` wiring covers buttons inside any modal
-  automatically since it queries the whole document, not just `#view`; the one bit of custom
-  wiring is `.modal-backdrop`'s click handler, which fires whatever action its own
-  `data-close-action` attribute names (`close-schedule-cell` or `close-staff-edit`) only when
+  every modal-render function (`renderScheduleModal() + renderStaffEditModal() +
+  renderChangePinModal()`) into its `innerHTML` on every render cycle, same as any other view —
+  each modal has no separate render loop of its own, it's just driven by its own bit of `state`
+  (`state.selectedScheduleCell`, `state.editingStaffId`, `state.showChangePinModal`) like
+  everything else. In practice at most one produces real markup at a time (nothing stops more
+  than one being open simultaneously in state, but nothing in the UI drives that either).
+  `bindView()`'s generic `[data-action]` wiring covers buttons inside any modal automatically
+  since it queries the whole document, not just `#view`; the one bit of custom wiring is
+  `.modal-backdrop`'s click handler, which fires whatever action its own `data-close-action`
+  attribute names (`close-schedule-cell`, `close-staff-edit`, or `close-change-pin`) only when
   `event.target === backdrop` itself (i.e. the darkened area, not a click occurring somewhere
-  inside `.modal-card` and bubbling up). **Adding a third modal**: give its backdrop a
+  inside `.modal-card` and bubbling up). **Adding another modal**: give its backdrop a
   `data-close-action`, add its own state field, and append its render function's output alongside
-  the other two in `render()` — don't hardcode a single close action in the backdrop wiring again,
+  the others in `render()` — don't hardcode a single close action in the backdrop wiring again,
   that was a real bug caught while adding the second modal (every backdrop click closed the
   schedule-cell modal specifically, regardless of which modal was actually open). Everywhere else
   in the app still renders inline into `#view` with no modal — this exists specifically because a
@@ -123,6 +124,14 @@ the repo/title still say "Didi Malatang Hub" for clarity, but the **UI itself no
     orphaned (no matching `staff` doc → `ensureStaffDoc` resolves no role → app signs them
     back out immediately with an error). Say this plainly if a user asks to "delete an
     account" — it isn't a full account deletion.
+  - **Changing your *own* PIN is a different, much simpler operation than provisioning a new
+    account** — no secondary app or Admin SDK needed, since Firebase Auth lets a signed-in user
+    update their own password directly (`DB.changePassword(currentPin, newPin)` in `db.js`,
+    reachable from the "เปลี่ยน PIN" button in the topbar user-chip, any role). It re-authenticates
+    with the current PIN first via `reauthenticateWithCredential` before calling
+    `updatePassword` — skipping that step works fine on a fresh login but throws
+    `auth/requires-recent-login` on an older session, so don't remove the reauth step to
+    "simplify" this even though it looks redundant with `DB.login`.
 - One bootstrap **App Owner** account (`owner@didi-malatang.local`, fixed, must be created manually
   in the Firebase console — Authentication → Add user) is trusted unconditionally by both
   `firestore.rules` (`isOwnerEmail()`) and `ensureStaffDoc()` in `app.js`, so the restaurant can

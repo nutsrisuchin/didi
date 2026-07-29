@@ -18,7 +18,8 @@ const state = {
   financialMonth: monthISO(),
   timesheetMonth: monthISO(),
   selectedScheduleCell: null,
-  editingStaffId: null
+  editingStaffId: null,
+  showChangePinModal: false
 };
 
 const THAI_WEEKDAY_SHORT = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'];
@@ -385,7 +386,7 @@ function render() {
   } else if (state.view === 'financial') {
     content.innerHTML = renderFinancial();
   }
-  document.querySelector('#modal-host').innerHTML = renderScheduleModal() + renderStaffEditModal();
+  document.querySelector('#modal-host').innerHTML = renderScheduleModal() + renderStaffEditModal() + renderChangePinModal();
   bindView();
   document.querySelectorAll('.nav-btn').forEach((button) => {
     const roleMin = button.dataset.roleMin;
@@ -623,6 +624,39 @@ function renderStaffEditModal() {
         <div class="row" style="margin-top:0.8rem">
           <button class="btn" data-action="save-staff-edit">บันทึก</button>
           <button class="btn secondary" data-action="close-staff-edit">ปิด</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+// Self-service PIN change, reachable from the topbar user-chip by anyone
+// signed in — see DB.changePassword in db.js for why it needs the current
+// PIN too, not just the new one.
+function renderChangePinModal() {
+  if (!state.showChangePinModal) return '';
+  return `
+    <div class="modal-backdrop" data-close-action="close-change-pin">
+      <div class="modal-card">
+        <h3 style="margin:0 0 0.5rem">เปลี่ยนรหัส PIN</h3>
+        <div class="stack">
+          <label>
+            รหัส PIN ปัจจุบัน
+            <input type="password" inputmode="numeric" autocomplete="current-password" id="current-pin-input" />
+          </label>
+          <label>
+            รหัส PIN ใหม่ (อย่างน้อย 6 หลัก)
+            <input type="password" inputmode="numeric" autocomplete="new-password" id="new-pin-input" />
+          </label>
+          <label>
+            ยืนยันรหัส PIN ใหม่
+            <input type="password" inputmode="numeric" autocomplete="new-password" id="confirm-pin-input" />
+          </label>
+        </div>
+        <p id="change-pin-error" class="error" hidden></p>
+        <div class="row" style="margin-top:0.8rem">
+          <button class="btn" data-action="submit-change-pin">บันทึก</button>
+          <button class="btn secondary" data-action="close-change-pin">ปิด</button>
         </div>
       </div>
     </div>
@@ -1831,6 +1865,54 @@ async function handleAction(action, data) {
     state.editingStaffId = null;
     await pushNotification('แก้ไขข้อมูลพนักงานแล้ว', `${state.currentStaff?.name || ''} แก้ไขข้อมูลของ ${name}`);
     render();
+    return;
+  }
+
+  if (action === 'open-change-pin') {
+    state.showChangePinModal = true;
+    render();
+    return;
+  }
+
+  if (action === 'close-change-pin') {
+    state.showChangePinModal = false;
+    render();
+    return;
+  }
+
+  if (action === 'submit-change-pin') {
+    const errorEl = document.querySelector('#change-pin-error');
+    const showError = (message) => {
+      if (errorEl) {
+        errorEl.textContent = message;
+        errorEl.hidden = false;
+      }
+    };
+    const currentPin = document.querySelector('#current-pin-input')?.value || '';
+    const newPin = document.querySelector('#new-pin-input')?.value || '';
+    const confirmPin = document.querySelector('#confirm-pin-input')?.value || '';
+    if (newPin !== confirmPin) {
+      showError('รหัส PIN ใหม่ทั้งสองช่องไม่ตรงกัน');
+      return;
+    }
+    if (newPin.length < 6) {
+      showError('รหัส PIN ใหม่ต้องมีอย่างน้อย 6 หลัก');
+      return;
+    }
+    try {
+      await DB.changePassword(currentPin, newPin);
+      state.showChangePinModal = false;
+      await pushNotification('เปลี่ยนรหัส PIN แล้ว', `${state.currentStaff?.name || ''} เปลี่ยนรหัส PIN ของตัวเองแล้ว`);
+      render();
+    } catch (error) {
+      const messages = {
+        'auth/wrong-password': 'รหัส PIN ปัจจุบันไม่ถูกต้อง',
+        'auth/weak-password': 'รหัส PIN ใหม่สั้นเกินไป ต้องมีอย่างน้อย 6 หลัก',
+        'auth/requires-recent-login': 'เซสชันเก่าเกินไป กรุณาออกจากระบบแล้วเข้าสู่ระบบใหม่ก่อนเปลี่ยนรหัส PIN',
+        'auth/too-many-requests': 'พยายามหลายครั้งเกินไป กรุณาลองใหม่ภายหลัง'
+      };
+      showError(messages[error?.code] || `เกิดข้อผิดพลาด: ${error?.message || 'ไม่ทราบสาเหตุ'}`);
+    }
     return;
   }
 }

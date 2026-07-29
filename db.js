@@ -73,6 +73,19 @@ const DB = {
     }
   },
 
+  // Self-service PIN change for whoever is currently signed in. Firebase
+  // requires "recent login" for a sensitive op like updatePassword, so this
+  // re-authenticates with the current PIN first rather than assuming the
+  // existing session is fresh enough — a session that's been open a while
+  // would otherwise fail with auth/requires-recent-login.
+  async changePassword(currentPin, newPin) {
+    const user = auth.currentUser;
+    if (!user || !user.email) throw new Error('ไม่พบผู้ใช้ที่เข้าสู่ระบบ');
+    const credential = firebase.auth.EmailAuthProvider.credential(user.email, currentPin);
+    await user.reauthenticateWithCredential(credential);
+    await user.updatePassword(newPin);
+  },
+
   watch(collection, callback) {
     return firestore.collection(collection).onSnapshot(
       (snapshot) => {
