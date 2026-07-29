@@ -666,18 +666,17 @@ function renderChangePinModal() {
 
 function renderTimesheet() {
   const canManage = roleAtLeast('Manager');
-  const staffList = canManage
-    ? state.staff.filter((s) => s.employmentType)
-    : state.staff.filter((s) => s.id === state.currentUser?.uid);
+  const staffList = state.staff.filter((s) => s.employmentType);
 
-  // Employees only get a read-only view of their own monthly schedule —
-  // marking/editing attendance for anyone (including themselves) is
-  // Manager+ only, and the daily quick-mark panel is irrelevant to them.
+  // Employees see everyone's monthly schedule (read-only) so they know who's
+  // on/off — but only the schedule grid, nothing else: no daily quick-mark
+  // panel, no editable cells, no pay/salary info (already hidden elsewhere
+  // by RBAC). Marking/editing attendance for anyone is still Manager+ only.
   if (!canManage) {
     return `
       <div class="grid">
         <section class="card">
-          <h2 style="margin-top:0">ตารางเวลาประจำเดือนของคุณ</h2>
+          <h2 style="margin-top:0">ตารางเวลาประจำเดือน</h2>
           <form data-form="schedule-month-form" class="row">
             <label style="min-width:220px">
               เดือน

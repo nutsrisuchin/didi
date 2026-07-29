@@ -171,10 +171,15 @@ changing permissions: `render()`'s nav gating, each `handleAction`/`handleForm` 
   when the viewer isn't Admin+ (new hires get `dailyRate: 0` until Admin/Owner sets a real rate
   from Financial); this is also enforced server-side (see below), not just hidden in the UI.
 - **Employee**: log in, tick off checklist sub-tasks and submit checklist reports. On Timesheet,
-  sees *only* a read-only monthly schedule grid for themselves (`renderTimesheet` early-returns a
-  completely different, much shorter view when `!canManage` — no daily quick-mark panel, no
-  editable cells, `renderMonthlySchedule(staffList, false)` renders plain `<span>`s instead of
-  buttons). Read-only everywhere else.
+  sees a read-only monthly schedule grid **for every paid staff member, not just themselves**
+  (`staffList` is the same `state.staff.filter((s) => s.employmentType)` used for Manager+, no
+  self-filtering) — so they can see who's on/off, but nothing else: `renderTimesheet`
+  early-returns a completely different, much shorter view when `!canManage` with no daily
+  quick-mark panel and no editable cells (`renderMonthlySchedule(staffList, false)` renders plain
+  `<span>`s instead of buttons). No pay/salary figure is shown here regardless of who's viewing —
+  `renderMonthlySchedule` only ever displays clock-in/out times or "หยุด", never `pay`, so there
+  was nothing to gate when this view was widened from "just yourself" to "everyone." Read-only
+  everywhere else.
 - A Manager creating a new `staff` doc is restricted server-side to `role in ['Employee',
   'Manager'] && dailyRate == 0` (`firestore.rules`) — without the role split a Manager could
   craft a raw Firestore write to self-promote to Admin/Owner via the same "create" permission
