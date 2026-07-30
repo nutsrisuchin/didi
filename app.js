@@ -968,6 +968,7 @@ function renderWarehouse() {
           <button class="btn secondary" data-action="update-item-photo" data-id="${item.id}">${item.imageUrl ? 'เปลี่ยนรูป' : 'เพิ่มรูป'}</button>
         ` : ''}
         ${canManage ? `<button class="btn danger" data-action="delete-item" data-id="${item.id}">ลบ</button>` : ''}
+        <span class="small muted stock-updated-at">${formatDate(item.updatedAt || item.createdAt)}</span>
       </div>
     `).join('');
 
@@ -1519,7 +1520,8 @@ async function handleForm(name, formData) {
       unit: formData.get('unit'),
       quantity: Number(formData.get('quantity') || 0),
       imageUrl,
-      createdAt: nowISO()
+      createdAt: nowISO(),
+      updatedAt: nowISO()
     };
     await DB.put('warehouseItems', item);
     upsertLocal('warehouseItems', item);
@@ -1811,7 +1813,7 @@ async function handleAction(action, data) {
     if (!roleAtLeast('Manager')) return;
     if (state.warehouseItems.length > 0) return;
     for (const seed of STOCK_SEED_DATA) {
-      const item = { id: DB.uid('item'), ...seed, imageUrl: '', createdAt: nowISO() };
+      const item = { id: DB.uid('item'), ...seed, imageUrl: '', createdAt: nowISO(), updatedAt: nowISO() };
       await DB.put('warehouseItems', item);
       upsertLocal('warehouseItems', item);
       const log = { id: DB.uid('wlog'), itemId: item.id, quantity: item.quantity, recordedAt: nowISO() };
@@ -1854,7 +1856,7 @@ async function handleAction(action, data) {
     if (!item) return;
     const input = document.querySelector(`[data-quantity-for="${data.id}"]`);
     const quantity = Math.max(0, Number(input?.value ?? item.quantity));
-    const record = { ...item, quantity };
+    const record = { ...item, quantity, updatedAt: nowISO() };
     try {
       await DB.put('warehouseItems', record);
       upsertLocal('warehouseItems', record);
@@ -1882,7 +1884,7 @@ async function handleAction(action, data) {
     const file = imageInput?.files?.[0];
     if (!file) return;
     const imageUrl = await fileToCompressedDataUrl(file);
-    const record = { ...item, imageUrl };
+    const record = { ...item, imageUrl, updatedAt: nowISO() };
     await DB.put('warehouseItems', record);
     upsertLocal('warehouseItems', record);
     render();

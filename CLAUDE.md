@@ -451,7 +451,15 @@ Storage" note above; images live inline on the docs below as base64 data URLs.
   back to `'อื่นๆ'` when unset), `name`, `unit` (free text — no fixed unit list), `quantity`
   (decimal, e.g. `1.5` for a partially-used pack), `imageUrl` (compressed base64 JPEG data URL,
   or `''` — settable at creation, and separately addable/replaceable later per-item via the
-  Warehouse view's "เพิ่มรูป"/"เปลี่ยนรูป" control, `update-item-photo` action), `createdAt`.
+  Warehouse view's "เพิ่มรูป"/"เปลี่ยนรูป" control, `update-item-photo` action), `createdAt`,
+  `updatedAt` (stamped on every write path that touches an existing item — quantity update,
+  photo update — as well as at creation; items that predate this field fall back to `createdAt`
+  wherever it's displayed, via `item.updatedAt || item.createdAt`, rather than showing nothing).
+  Each item's card in the Warehouse view shows this as a small muted date (`formatDate`,
+  `.stock-updated-at` in `styles.css`) after the ลบ button, so anyone can see at a glance when an
+  item was last touched without affecting the row's height — deliberately *not* the same thing as
+  the latest `warehouseLogs` entry for that item, which only exists for quantity changes and would
+  miss a photo-only update.
   The Warehouse screen has a Manager+-only **`state.warehouseEditMode`** toggle
   ("แก้ไขคลังสินค้า"/"เสร็จสิ้นการแก้ไข") that hides, by default, the "เพิ่มสินค้า" create-item
   form, the one-time stock-sheet import section, and each item's photo-upload control — this was
