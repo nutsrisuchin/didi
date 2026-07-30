@@ -132,7 +132,8 @@ textarea { min-height: 5rem; resize: vertical; }
 .stock-qty { font-weight: 600; text-align: center; }
 .stock-unit { color: var(--color-muted); text-align: center; }
 .stock-manage { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; padding: 0 0.9rem 0.75rem; border-top: none; }
-.stock-updated-at { white-space: nowrap; margin-left: auto; }
+.stock-delete-row { display: flex; align-items: center; gap: 0.4rem; margin-left: auto; }
+.stock-updated-at { white-space: nowrap; color: var(--color-muted); font-size: 0.68rem; }
 .schedule-table, .schedule-summary-table { border-collapse: collapse; width: 100%; }
 .schedule-table th, .schedule-table td, .schedule-summary-table th, .schedule-summary-table td {
   border: 1px solid var(--color-border-soft);

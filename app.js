@@ -967,8 +967,12 @@ function renderWarehouse() {
           <input type="file" accept="image/*" data-image-for="${item.id}" />
           <button class="btn secondary" data-action="update-item-photo" data-id="${item.id}">${item.imageUrl ? 'เปลี่ยนรูป' : 'เพิ่มรูป'}</button>
         ` : ''}
-        ${canManage ? `<button class="btn danger" data-action="delete-item" data-id="${item.id}">ลบ</button>` : ''}
-        <span class="small muted stock-updated-at">${formatDate(item.updatedAt || item.createdAt)}</span>
+        ${canManage ? `
+          <span class="stock-delete-row">
+            <button class="btn danger" data-action="delete-item" data-id="${item.id}">ลบ</button>
+            <span class="stock-updated-at">${formatDate(item.updatedAt || item.createdAt)}</span>
+          </span>
+        ` : `<span class="stock-updated-at">${formatDate(item.updatedAt || item.createdAt)}</span>`}
       </div>
     `).join('');
 
