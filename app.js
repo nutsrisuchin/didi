@@ -16,6 +16,7 @@ const state = {
   warehouseLogs: [],
   collapsedStockCategories: new Set(),
   warehouseEditMode: false,
+  showAllRestockPriorities: false,
   financialMonth: monthISO(),
   timesheetMonth: monthISO(),
   selectedScheduleCell: null,
@@ -935,7 +936,9 @@ function renderWarehouse() {
     .filter((entry) => entry.daysLeft <= 14 || Number(entry.item.quantity) <= entry.reorderPoint)
     .sort((a, b) => a.daysLeft - b.daysLeft);
   const noDataCount = insights.length - withData.length;
-  const priorityRows = priorityItems.map(({ item, usagePerDay, daysLeft, suggestedOrder }) => {
+  const visiblePriorityItems = state.showAllRestockPriorities ? priorityItems : priorityItems.slice(0, 5);
+  const hiddenPriorityCount = priorityItems.length - visiblePriorityItems.length;
+  const priorityRows = visiblePriorityItems.map(({ item, usagePerDay, daysLeft, suggestedOrder }) => {
     const urgent = daysLeft <= 3;
     return `
       <div class="list-item">
@@ -1006,6 +1009,11 @@ function renderWarehouse() {
       <section class="card">
         <h2 style="margin-top:0">ลำดับความสำคัญในการเติมสต็อก</h2>
         ${priorityItems.length ? `<div class="list">${priorityRows}</div>` : '<p class="muted">ทุกรายการมีสต็อกเพียงพอในตอนนี้</p>'}
+        ${priorityItems.length > 5 ? `
+          <button type="button" class="btn secondary" style="margin-top:0.6rem" data-action="toggle-restock-priorities-expanded">
+            ${state.showAllRestockPriorities ? 'ย่อรายการ ▲' : `ดูอีก ${hiddenPriorityCount} รายการ ▼`}
+          </button>
+        ` : ''}
         ${noDataCount ? `<p class="small muted" style="margin-top:0.6rem">${noDataCount} รายการยังไม่มีข้อมูลเพียงพอในการคำนวณ — ระบบจะเริ่มคำนวณอัตราการใช้หลังมีการอัปเดตจำนวนอย่างน้อย 2 ครั้ง</p>` : ''}
       </section>
       ${editMode ? `
@@ -1792,6 +1800,12 @@ async function handleAction(action, data) {
     removeLocal('attendance', id);
     state.selectedScheduleCell = null;
     await pushNotification('อัปเดตตารางเวลา', `${state.currentStaff?.name || ''} ยกเลิกวันหยุดของ ${employee?.name || ''} วันที่ ${formatDate(date)} (กลับมาทำงานตามปกติ)`);
+    render();
+    return;
+  }
+
+  if (action === 'toggle-restock-priorities-expanded') {
+    state.showAllRestockPriorities = !state.showAllRestockPriorities;
     render();
     return;
   }

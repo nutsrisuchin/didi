@@ -497,7 +497,11 @@ Storage" note above; images live inline on the docs below as base64 data URLs.
     `data-action="nav-warehouse"`) navigates straight into this section rather than opening a
     modal — a modal now exists elsewhere in the app (see the modal system note above) but wasn't
     the right fit here, since this is "go look at a whole page of detail," not "edit one small
-    thing in place."
+    thing in place." It only renders the first 5 entries of the (already-sorted-by-urgency)
+    `priorityItems` array by default — `state.showAllRestockPriorities` (boolean,
+    `toggle-restock-priorities-expanded` action) reveals the rest. The expand/collapse button
+    itself is only rendered at all when `priorityItems.length > 5`, so a shop with a short list
+    never sees a pointless toggle for zero hidden rows.
   - **`renderWarehouseAnalytics()`** (nav button "วิเคราะห์คลังสินค้า", `state.view ===
     'warehouse-analytics'`) is a separate, dedicated tab that runs `computeStockInsight` over
     *every* item, not just the low/urgent ones — sorted soonest-to-run-out first, `!hasData` items
