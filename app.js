@@ -85,6 +85,26 @@ function formatDate(value) {
   return `${date.getDate()}/${date.getMonth() + 1}/${date.getFullYear()}`;
 }
 
+function csvEscape(value) {
+  const text = value === null || value === undefined ? '' : String(value);
+  return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+function downloadCsv(filename, rows) {
+  const csv = rows.map((row) => row.map(csvEscape).join(',')).join('\r\n');
+  // Leading BOM so Excel on Windows detects UTF-8 and renders Thai text
+  // correctly instead of mojibake — plain UTF-8 without it is routinely
+  // misread as the system codepage by Excel specifically (browsers/Sheets
+  // don't need it, but Excel is the realistic destination for this export).
+  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
 function toMinutes(time) {
   const [hours, minutes] = time.split(':').map(Number);
   return hours * 60 + minutes;
@@ -1113,9 +1133,12 @@ function renderWarehouseAnalytics() {
           คำนวณอัตราการใช้ต่อวันของแต่ละสินค้าจากประวัติการอัปเดตจำนวน แล้วประเมินว่าอีกกี่วันสินค้าจะหมด
           พร้อมจุดสั่งซื้อ (lead time 7 วัน + สำรอง 30%) และปริมาณแนะนำในการสั่งเพิ่ม (พอใช้ 14 วัน)
         </p>
-        ${canManage && !historyImported ? `
-          <button class="btn secondary" data-action="import-stock-history">นำเข้าประวัติสต็อกเก่า (เม.ย.-ก.ค. 69)</button>
-        ` : ''}
+        <div class="row">
+          ${canManage && !historyImported ? `
+            <button class="btn secondary" data-action="import-stock-history">นำเข้าประวัติสต็อกเก่า (เม.ย.-ก.ค. 69)</button>
+          ` : ''}
+          <button class="btn secondary" data-action="export-warehouse-analytics-csv">ส่งออกข้อมูล (CSV)</button>
+        </div>
       </section>
       <section class="card">
         <div class="list">${rows || '<p class="muted">ยังไม่มีสินค้าในคลัง</p>'}</div>
@@ -1865,6 +1888,45 @@ async function handleAction(action, data) {
     }
     await pushNotification('นำเข้าประวัติสต็อกแล้ว', `นำเข้าประวัติการเช็คสต็อก ${importedCount} รายการ (เม.ย.-ก.ค. 69) เพื่อคำนวณอัตราการใช้ย้อนหลัง`);
     render();
+    return;
+  }
+
+  if (action === 'export-warehouse-analytics-csv') {
+    const sortedItems = state.warehouseItems.slice().sort((a, b) => a.name.localeCompare(b.name, 'th'));
+    const rows = [
+      ['สรุปการวิเคราะห์คลังสินค้า'],
+      ['ชื่อสินค้า', 'หมวดหมู่', 'หน่วย', 'จำนวนคงเหลือ', 'ใช้ต่อวัน', 'เหลืออีก (วัน)', 'จุดสั่งซื้อ', 'แนะนำสั่งเพิ่ม']
+    ];
+    sortedItems.forEach((item) => {
+      const insight = computeStockInsight(item);
+      rows.push([
+        item.name,
+        item.category || '',
+        item.unit,
+        item.quantity,
+        insight.hasData ? insight.usagePerDay.toFixed(2) : '',
+        insight.hasData ? Math.max(0, Math.floor(insight.daysLeft)) : '',
+        insight.hasData ? insight.reorderPoint.toFixed(2) : '',
+        insight.hasData ? Math.max(0, Math.ceil(insight.suggestedOrder)) : ''
+      ]);
+    });
+
+    rows.push([]);
+    rows.push(['ประวัติการเช็คสต็อก (รายการดิบทุกครั้งที่มีการอัปเดตจำนวน)']);
+    rows.push(['ชื่อสินค้า', 'วันที่', 'จำนวนคงเหลือ ณ วันนั้น']);
+    const itemNameById = new Map(state.warehouseItems.map((item) => [item.id, item.name]));
+    state.warehouseLogs
+      .slice()
+      .sort((a, b) => {
+        const nameA = itemNameById.get(a.itemId) || '';
+        const nameB = itemNameById.get(b.itemId) || '';
+        return nameA.localeCompare(nameB, 'th') || (a.recordedAt || '').localeCompare(b.recordedAt || '');
+      })
+      .forEach((log) => {
+        rows.push([itemNameById.get(log.itemId) || '(สินค้าที่ถูกลบแล้ว)', (log.recordedAt || '').slice(0, 10), log.quantity]);
+      });
+
+    downloadCsv(`warehouse-analytics-${todayISO()}.csv`, rows);
     return;
   }
 

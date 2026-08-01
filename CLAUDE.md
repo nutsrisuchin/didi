@@ -509,6 +509,24 @@ Storage" note above; images live inline on the docs below as base64 data URLs.
     seeing the analysis isn't sensitive, only the backfill button below is gated. Each row shows
     current quantity, usage/day, reorder point, suggested order, and a days-left badge (or "ไม่มี
     ข้อมูล" if `!hasData`).
+  - **"ส่งออกข้อมูล (CSV)"** (`export-warehouse-analytics-csv` action, visible to every role like
+    the rest of this tab — it's a read-only local download, nothing sensitive) generates a single
+    CSV via `downloadCsv()`/`csvEscape()` (both in `app.js`, no library) with two stacked sections
+    separated by a blank row: a per-item analysis summary (same fields as the on-screen list, one
+    row per item, sorted by Thai name), then every raw `warehouseLogs` entry across all items
+    (item name, `recordedAt` date, quantity — the actual consumption history, not just the derived
+    rate), sorted by item name then date. This is the only way to get the full log history out of
+    the app — the on-screen tab only ever shows the *derived* rate, never the raw log list.
+    `downloadCsv` prepends a UTF-8 BOM character (U+FEFF) to the blob content — in the source
+    this is written as the actual invisible BOM character inside the string literal rather than
+    the backslash-u-FEFF escape sequence; both produce the identical runtime string, so don't
+    "fix" it into the escape form thinking the literal character is a mistake. Without it, Excel on
+    Windows (the realistic destination for a Thai-language export) misreads the file as the
+    system codepage and shows mojibake instead of Thai text; browsers and Google Sheets don't
+    have this problem, but Excel is the target here.
+    It's a one-time snapshot at click time, not a live-synced file — there's no scheduled/automatic
+    export, consistent with this being a static, client-only app with nothing server-side to run
+    a job on.
   - **`STOCK_HISTORY_DATES`/`STOCK_HISTORY_DATA`** (`app.js`, near `STOCK_SEED_DATA`) is a one-time
     backfill dataset transcribed from `stock_data_1.md`'s 32 historical stock-check columns
     (5/4/69–23/7/69 — Thai Buddhist year 69 = 2026 CE — matched to `warehouseItems` by name, `null`
