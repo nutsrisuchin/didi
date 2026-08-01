@@ -513,10 +513,16 @@ Storage" note above; images live inline on the docs below as base64 data URLs.
     the rest of this tab — it's a read-only local download, nothing sensitive) generates a single
     CSV via `downloadCsv()`/`csvEscape()` (both in `app.js`, no library) with two stacked sections
     separated by a blank row: a per-item analysis summary (same fields as the on-screen list, one
-    row per item, sorted by Thai name), then every raw `warehouseLogs` entry across all items
-    (item name, `recordedAt` date, quantity — the actual consumption history, not just the derived
-    rate), sorted by item name then date. This is the only way to get the full log history out of
-    the app — the on-screen tab only ever shows the *derived* rate, never the raw log list.
+    row per item, sorted by Thai name), then the full consumption history **pivoted item-rows ×
+    date-columns** (one row per item, one column per distinct check date across all
+    `warehouseLogs`, cell = quantity recorded that day, blank if that item had no reading that
+    day) — deliberately matching the shape of the user's own `stock_data_1.md` sheet rather than
+    a long/tidy one-row-per-log format, since that's what was actually asked for. If an item has
+    more than one log on the same calendar date, the later `recordedAt` timestamp wins for that
+    cell. Logs belonging to a since-deleted item (no matching `state.warehouseItems` entry) still
+    get their own row, grouped by `itemId` and labeled "(สินค้าที่ถูกลบแล้ว)" rather than being
+    silently dropped. This pivoted table is the only way to get the full log history out of the
+    app — the on-screen tab only ever shows the *derived* rate, never the raw log list.
     `downloadCsv` prepends a UTF-8 BOM character (U+FEFF) to the blob content — in the source
     this is written as the actual invisible BOM character inside the string literal rather than
     the backslash-u-FEFF escape sequence; both produce the identical runtime string, so don't

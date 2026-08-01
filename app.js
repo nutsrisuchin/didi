@@ -1911,20 +1911,41 @@ async function handleAction(action, data) {
       ]);
     });
 
+    // Pivoted to match the shape of the user's own stock_data_1.md sheet: one row per
+    // item, one column per check date, cell = quantity recorded that day. Long-format
+    // (one row per log) is easier to build but is not what was asked for here — this is
+    // deliberately item-rows / date-columns, not log-rows.
     rows.push([]);
     rows.push(['ประวัติการเช็คสต็อก (รายการดิบทุกครั้งที่มีการอัปเดตจำนวน)']);
-    rows.push(['ชื่อสินค้า', 'วันที่', 'จำนวนคงเหลือ ณ วันนั้น']);
     const itemNameById = new Map(state.warehouseItems.map((item) => [item.id, item.name]));
-    state.warehouseLogs
-      .slice()
-      .sort((a, b) => {
-        const nameA = itemNameById.get(a.itemId) || '';
-        const nameB = itemNameById.get(b.itemId) || '';
-        return nameA.localeCompare(nameB, 'th') || (a.recordedAt || '').localeCompare(b.recordedAt || '');
-      })
-      .forEach((log) => {
-        rows.push([itemNameById.get(log.itemId) || '(สินค้าที่ถูกลบแล้ว)', (log.recordedAt || '').slice(0, 10), log.quantity]);
+    const latestByItemAndDate = new Map(); // `${itemId}|${date}` -> { quantity, recordedAt }
+    const dateSet = new Set();
+    const deletedItemIds = new Set();
+    state.warehouseLogs.forEach((log) => {
+      const date = (log.recordedAt || '').slice(0, 10);
+      if (!date) return;
+      dateSet.add(date);
+      if (!itemNameById.has(log.itemId)) deletedItemIds.add(log.itemId);
+      const key = `${log.itemId}|${date}`;
+      const existing = latestByItemAndDate.get(key);
+      if (!existing || (log.recordedAt || '') > existing.recordedAt) {
+        latestByItemAndDate.set(key, { quantity: log.quantity, recordedAt: log.recordedAt || '' });
+      }
+    });
+    const sortedDates = Array.from(dateSet).sort();
+    rows.push(['ชื่อสินค้า', ...sortedDates.map((date) => formatDate(date))]);
+    const historyItemRows = [
+      ...sortedItems.map((item) => ({ id: item.id, name: item.name })),
+      ...Array.from(deletedItemIds).map((id) => ({ id, name: '(สินค้าที่ถูกลบแล้ว)' }))
+    ];
+    historyItemRows.forEach(({ id, name }) => {
+      const row = [name];
+      sortedDates.forEach((date) => {
+        const entry = latestByItemAndDate.get(`${id}|${date}`);
+        row.push(entry ? entry.quantity : '');
       });
+      rows.push(row);
+    });
 
     downloadCsv(`warehouse-analytics-${todayISO()}.csv`, rows);
     return;
