@@ -299,6 +299,30 @@ save/clear) name the acting user by reading `state.currentStaff.name` at the poi
 notifications matters after `state.currentStaff` is unavailable (e.g. auditing much later), the
 per-record `updatedBy` uid on the `attendance` doc itself is the durable source of truth.
 
+**Firestore read cost**: `notifications` is the fastest-growing, most-read-unbounded collection
+in the app — almost every mutation anywhere pushes one, and nothing ever deletes old ones. Every
+other collection is watched with a bare `DB.watch(name, cb)` (unbounded `onSnapshot` on the whole
+collection — fine for `staff`/`warehouseItems`/`routines`/`holidays` since those are naturally
+small, self-limiting by real-world headcount/inventory/checklist counts), but `notifications`
+specifically uses `DB.watchRecentNotifications(cb, limit=50)` (`db.js`) — a live `onSnapshot`
+scoped to `.orderBy('createdAt','desc').limit(50)` — so a re-open of the app only ever re-reads
+the most recent 50 regardless of how large the collection has grown, rather than the whole
+history every time. Older notifications are reachable on demand via the "โหลดเพิ่มเติม" button
+(`load-more-notifications` action → `DB.getOlderNotifications(beforeCreatedAt, limit)`), a
+one-time `.get()` with `.startAfter()` — deliberately *not* another live listener, since stacking
+up more `onSnapshot`s the longer someone stays on the page would defeat the point. Loaded-older
+notifications land in `state.olderNotifications`, concatenated after the live `state.notifications`
+for display; `mark-all-read` updates both arrays directly (rather than via `upsertLocal`, which
+only ever touches `state.notifications` by collection name). `state.moreNotificationsAvailable`
+latches permanently to `false` once a page comes back shorter than the limit — safe to treat as
+permanent because notifications are append-only (never deleted or reordered), so once the true
+end has been reached there's no way for a gap to reopen underneath already-loaded history; new
+notifications only ever extend the live top, not the older tail. If a future need calls for
+capping another growing collection's reads (`warehouseLogs`, `attendance` are the next-largest —
+see the Warehouse Analytics and Business logic sections above for why those specifically are
+riskier to truncate), copy this same live-window-plus-manual-page-in shape rather than reaching
+for a different pattern.
+
 ## Language
 
 The UI is Thai throughout `index.html` and `app.js` — labels, buttons, headings, placeholders,

@@ -95,6 +95,39 @@ const DB = {
     );
   },
 
+  // notifications grows forever (nearly every mutation in the app pushes one,
+  // nothing ever deletes old ones) — watching the whole collection re-reads
+  // every doc in it on every app open. This scopes the live listener to just
+  // the most recent `limit`, which is also all renderNotifications actually
+  // displays without pagination. Older history is reachable on demand via
+  // getOlderNotifications below, as a one-time (non-live) read.
+  watchRecentNotifications(callback, limit = 50) {
+    return firestore
+      .collection('notifications')
+      .orderBy('createdAt', 'desc')
+      .limit(limit)
+      .onSnapshot(
+        (snapshot) => {
+          callback(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
+        },
+        (error) => console.error('watchRecentNotifications failed', error)
+      );
+  },
+
+  // One-time (not live) page of older notifications, for the "โหลดเพิ่มเติม"
+  // button — deliberately a plain .get() rather than another onSnapshot,
+  // since adding more live listeners the longer someone stays on the page
+  // would defeat the point of limiting the main watcher above.
+  async getOlderNotifications(beforeCreatedAt, limit = 50) {
+    const snapshot = await firestore
+      .collection('notifications')
+      .orderBy('createdAt', 'desc')
+      .startAfter(beforeCreatedAt)
+      .limit(limit)
+      .get();
+    return snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+  },
+
   async getOnce(collection, id) {
     const doc = await firestore.collection(collection).doc(id).get();
     return doc.exists ? { id: doc.id, ...doc.data() } : null;

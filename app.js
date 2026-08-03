@@ -17,6 +17,8 @@ const state = {
   collapsedStockCategories: new Set(),
   warehouseEditMode: false,
   showAllRestockPriorities: false,
+  olderNotifications: [],
+  moreNotificationsAvailable: true,
   financialMonth: monthISO(),
   timesheetMonth: monthISO(),
   selectedScheduleCell: null,
@@ -308,8 +310,13 @@ function startWatchers() {
     state.routineInspections = records;
     render();
   });
-  DB.watch('notifications', (records) => {
+  DB.watchRecentNotifications((records) => {
     state.notifications = records.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+    // Fewer than the query limit means this live window already covers every
+    // notification that exists — nothing more to page in. Safe to latch this
+    // permanently: notifications are only ever appended, never deleted or
+    // reordered, so once true there's never a gap for new ones to create.
+    if (records.length < 50) state.moreNotificationsAvailable = false;
     render();
   });
   DB.watch('holidays', (records) => {
@@ -1425,6 +1432,12 @@ function renderFinancial() {
 }
 
 function renderNotifications() {
+  // state.notifications is the live-watched most-recent window (see
+  // DB.watchRecentNotifications) — state.olderNotifications is manually
+  // paged in on demand via "โหลดเพิ่มเติม" and just appended, since old
+  // notifications essentially never change after creation (aside from
+  // `read`, which mark-all-read updates directly in both arrays).
+  const allNotifications = [...state.notifications, ...state.olderNotifications];
   return `
     <div class="grid">
       <section class="card">
@@ -1433,7 +1446,7 @@ function renderNotifications() {
           <button class="btn secondary" data-action="mark-all-read">ทำเครื่องหมายว่าอ่านแล้วทั้งหมด</button>
         </div>
         <div class="list" style="margin-top:0.8rem">
-          ${state.notifications.length ? state.notifications.map((note) => `
+          ${allNotifications.length ? allNotifications.map((note) => `
             <div class="list-item">
               <div>
                 <strong>${note.title}</strong>
@@ -1443,6 +1456,9 @@ function renderNotifications() {
             </div>
           `).join('') : '<p class="muted">ยังไม่มีการแจ้งเตือน</p>'}
         </div>
+        ${state.moreNotificationsAvailable && allNotifications.length ? `
+          <button class="btn secondary" style="margin-top:0.8rem" data-action="load-more-notifications">โหลดการแจ้งเตือนเก่าเพิ่มเติม</button>
+        ` : ''}
       </section>
     </div>
   `;
@@ -2028,13 +2044,25 @@ async function handleAction(action, data) {
   }
 
   if (action === 'mark-all-read') {
-    await Promise.all(
-      state.notifications.filter((note) => !note.read).map((note) => {
-        const record = { ...note, read: true };
-        upsertLocal('notifications', record);
-        return DB.put('notifications', record);
-      })
-    );
+    // Covers state.olderNotifications too (manually paged-in history), not
+    // just the live-watched window — upsertLocal only ever touches
+    // state.notifications by collection name, so those get updated directly
+    // here instead.
+    const unread = [...state.notifications, ...state.olderNotifications].filter((note) => !note.read);
+    await Promise.all(unread.map((note) => DB.put('notifications', { ...note, read: true })));
+    state.notifications = state.notifications.map((note) => ({ ...note, read: true }));
+    state.olderNotifications = state.olderNotifications.map((note) => ({ ...note, read: true }));
+    render();
+    return;
+  }
+
+  if (action === 'load-more-notifications') {
+    const allKnown = [...state.notifications, ...state.olderNotifications];
+    const oldest = allKnown[allKnown.length - 1];
+    if (!oldest) return;
+    const more = await DB.getOlderNotifications(oldest.createdAt, 50);
+    state.olderNotifications = [...state.olderNotifications, ...more];
+    if (more.length < 50) state.moreNotificationsAvailable = false;
     render();
     return;
   }
