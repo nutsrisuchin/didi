@@ -13,6 +13,7 @@ const state = {
   routineInspections: [],
   notifications: [],
   holidays: [],
+  fixedCosts: [],
   warehouseLogs: [],
   collapsedStockCategories: new Set(),
   warehouseEditMode: false,
@@ -321,6 +322,10 @@ function startWatchers() {
   });
   DB.watch('holidays', (records) => {
     state.holidays = records.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+    render();
+  });
+  DB.watch('fixedCosts', (records) => {
+    state.fixedCosts = records;
     render();
   });
   DB.watch('warehouseLogs', (records) => {
@@ -1364,6 +1369,12 @@ function renderFinancial() {
   const salaries = paidStaff.map((employee) => ({ employee, ...computeExpectedSalary(employee, state.financialMonth) }));
   const grandTotal = salaries.reduce((sum, entry) => sum + entry.total, 0);
 
+  const fixedCost = state.fixedCosts.find((entry) => entry.id === state.financialMonth) || {};
+  const rent = Number(fixedCost.rent || 0);
+  const water = Number(fixedCost.water || 0);
+  const electricity = Number(fixedCost.electricity || 0);
+  const fixedCostTotal = rent + water + electricity;
+
   const rows = salaries.map(({ employee, total, workedDays, offDays }) => `
     <div class="list-item" style="flex-direction:column; align-items:stretch; gap:0.5rem;">
       <div class="row" style="justify-content:space-between">
@@ -1407,6 +1418,29 @@ function renderFinancial() {
           <button class="btn" type="submit">ดูข้อมูล</button>
         </form>
         <p class="muted small" style="margin-top:0.5rem">ระบบสมมติว่าพนักงานมาทำงานตามปกติทุกวัน ยกเว้นวันที่ผู้จัดการทำเครื่องหมายว่าเป็นวันหยุดในตารางเวลา หากมีการลงเวลาจริง (เช่น มาสาย) ระบบจะใช้ข้อมูลจริงแทน</p>
+      </section>
+      <section class="card">
+        <div class="row" style="justify-content:space-between">
+          <h2 style="margin:0">ต้นทุนคงที่ประจำเดือน</h2>
+          <span class="badge">รวม ${formatCurrency(fixedCostTotal)}</span>
+        </div>
+        <form data-form="fixed-cost-form" class="stack" style="margin-top:0.8rem">
+          <div class="form-grid">
+            <label>
+              ค่าเช่า (฿)
+              <input name="rent" type="number" min="0" value="${rent}" />
+            </label>
+            <label>
+              ค่าน้ำ (฿)
+              <input name="water" type="number" min="0" value="${water}" />
+            </label>
+            <label>
+              ค่าไฟ (฿)
+              <input name="electricity" type="number" min="0" value="${electricity}" />
+            </label>
+          </div>
+          <button class="btn secondary" type="submit">บันทึกต้นทุนคงที่</button>
+        </form>
       </section>
       <section class="card">
         <h2 style="margin-top:0">เงินเดือนที่คาดการณ์ต่อพนักงาน</h2>
@@ -1615,6 +1649,24 @@ async function handleForm(name, formData) {
   if (name === 'financial-period-form') {
     if (!roleAtLeast('Admin')) return;
     state.financialMonth = formData.get('month') || monthISO();
+    render();
+    return;
+  }
+
+  if (name === 'fixed-cost-form') {
+    if (!roleAtLeast('Admin')) return;
+    const record = {
+      id: state.financialMonth,
+      month: state.financialMonth,
+      rent: Math.max(0, Number(formData.get('rent') || 0)),
+      water: Math.max(0, Number(formData.get('water') || 0)),
+      electricity: Math.max(0, Number(formData.get('electricity') || 0)),
+      updatedAt: nowISO(),
+      updatedBy: state.currentUser?.uid || ''
+    };
+    await DB.put('fixedCosts', record);
+    upsertLocal('fixedCosts', record);
+    await pushNotification('อัปเดตต้นทุนคงที่', `${state.currentStaff?.name || ''} บันทึกค่าเช่า/ค่าน้ำ/ค่าไฟของเดือน ${state.financialMonth}`);
     render();
     return;
   }

@@ -449,8 +449,8 @@ Restaurant staff use this on their phones, so these are checked for every new UI
 ## Data model (Didi Malatang Hub-specific)
 
 Firestore collections: `staff`, `attendance`, `warehouseItems`, `warehouseLogs`, `routines`,
-`routineInspections`, `notifications`, `holidays`. No Storage bucket — see the "no Firebase
-Storage" note above; images live inline on the docs below as base64 data URLs.
+`routineInspections`, `notifications`, `holidays`, `fixedCosts`. No Storage bucket — see the "no
+Firebase Storage" note above; images live inline on the docs below as base64 data URLs.
 
 - **`staff`** (doc ID = Auth `uid`): `name`, `role` (`App Owner`/`Admin`/`Manager`/`Employee`),
   `employmentType` (`full-time`/`part-time`/`''` for non-hourly Owner/Admin accounts),
@@ -612,3 +612,19 @@ Storage" note above; images live inline on the docs below as base64 data URLs.
   above): `date` (`YYYY-MM-DD`), `name` (free text, e.g. "Songkran"), `createdAt`. Managed from
   a small form inside the Financial view; write access is Admin+ only in `firestore.rules`
   (Managers can read but not add/remove holidays).
+- **`fixedCosts`** (doc ID = the month string itself, `YYYY-MM` — deterministic like `attendance`'s
+  `` `${date}_${staffId}` ``, so saving the same month twice upserts instead of duplicating):
+  `month` (redundant with the doc ID, kept as a field too for query/display convenience, same
+  reasoning as `attendance.date`), `rent`, `water`, `electricity` (all plain numbers, THB),
+  `updatedAt`, `updatedBy` (acting user's Auth uid, same convention as `attendance.updatedBy`).
+  Editable from a "ต้นทุนคงที่ประจำเดือน" card on the Financial view (`fixed-cost-form`,
+  Admin+ only in `firestore.rules`, same access level as the rest of Financial — not restricted
+  to the App Owner specifically, despite these being costs an owner would typically be the one
+  entering; kept consistent with how `dailyRate`/holidays are already Admin+, not Owner+, rather
+  than introducing a new narrower tier for just this one form). Scoped to whichever month
+  `state.financialMonth` currently points at, same as the payroll projection above it — switching
+  the month picker shows that month's saved rent/water/electricity (or zeros if never entered)
+  rather than one global figure. The card's total (`rent + water + electricity`) is a separate
+  badge from the payroll "รวม" total above it — deliberately not combined into one grand total,
+  since that wasn't asked for; if a combined fixed-cost-plus-payroll figure is wanted later, that's
+  a small addition, not a redesign.

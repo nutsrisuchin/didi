@@ -95,5 +95,10 @@ service cloud.firestore {
       allow read: if isSignedIn();
       allow write: if roleAtLeast('Admin');
     }
+
+    match /fixedCosts/{monthId} {
+      allow read: if isSignedIn();
+      allow write: if roleAtLeast('Admin');
+    }
   }
 }
