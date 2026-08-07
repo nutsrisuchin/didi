@@ -1664,9 +1664,19 @@ async function handleForm(name, formData) {
       updatedAt: nowISO(),
       updatedBy: state.currentUser?.uid || ''
     };
-    await DB.put('fixedCosts', record);
-    upsertLocal('fixedCosts', record);
-    await pushNotification('อัปเดตต้นทุนคงที่', `${state.currentStaff?.name || ''} บันทึกค่าเช่า/ค่าน้ำ/ค่าไฟของเดือน ${state.financialMonth}`);
+    try {
+      await DB.put('fixedCosts', record);
+      upsertLocal('fixedCosts', record);
+      await pushNotification('อัปเดตต้นทุนคงที่', `${state.currentStaff?.name || ''} บันทึกค่าเช่า/ค่าน้ำ/ค่าไฟของเดือน ${state.financialMonth}`);
+    } catch (error) {
+      // Same class of bug as update-item-quantity: an unhandled rejection
+      // here (e.g. permission-denied because firestore.rules in the Firebase
+      // console doesn't have the fixedCosts rule pasted in yet) used to fail
+      // completely silently — render() never ran, so clicking the button
+      // looked like it did nothing at all.
+      console.error('fixed-cost-form save failed', error);
+      alert('บันทึกต้นทุนคงที่ไม่สำเร็จ: ' + (error.message || error));
+    }
     render();
     return;
   }
