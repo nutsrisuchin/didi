@@ -1441,6 +1441,15 @@ function renderFinancial() {
           </div>
           <button class="btn secondary" type="submit">บันทึกต้นทุนคงที่</button>
         </form>
+        <table class="schedule-summary-table" style="margin-top:0.8rem; max-width:320px;">
+          <thead><tr><th>รายการ</th><th>จำนวนเงิน</th></tr></thead>
+          <tbody>
+            <tr><td>ค่าเช่า</td><td>${formatCurrency(rent)}</td></tr>
+            <tr><td>ค่าน้ำ</td><td>${formatCurrency(water)}</td></tr>
+            <tr><td>ค่าไฟ</td><td>${formatCurrency(electricity)}</td></tr>
+            <tr><td><strong>รวม</strong></td><td><strong>${formatCurrency(fixedCostTotal)}</strong></td></tr>
+          </tbody>
+        </table>
       </section>
       <section class="card">
         <h2 style="margin-top:0">เงินเดือนที่คาดการณ์ต่อพนักงาน</h2>
