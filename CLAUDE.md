@@ -624,7 +624,20 @@ Firebase Storage" note above; images live inline on the docs below as base64 dat
   than introducing a new narrower tier for just this one form). Scoped to whichever month
   `state.financialMonth` currently points at, same as the payroll projection above it — switching
   the month picker shows that month's saved rent/water/electricity (or zeros if never entered)
-  rather than one global figure. The card's total (`rent + water + electricity`) is a separate
-  badge from the payroll "รวม" total above it — deliberately not combined into one grand total,
-  since that wasn't asked for; if a combined fixed-cost-plus-payroll figure is wanted later, that's
-  a small addition, not a redesign.
+  rather than one global figure. The card's own total (`rent + water + electricity`) is shown both
+  as a badge and broken out in a small summary table beneath the form (reusing the
+  `schedule-summary-table` style rather than adding a new one purely for this).
+  - **"สรุปค่าใช้จ่ายประจำเดือน"** (a separate card, directly below the fixed-cost card) combines
+    fixed costs *and* payroll into one month-over-month comparison: ค่าเช่า/ค่าน้ำ/ค่าไฟ, ต้นทุนคงที่รวม,
+    เงินเดือนพนักงาน (the same `grandTotal` the per-employee list above already computes), and a
+    bolded รวมทั้งหมด row — each with a เดือนนี้/เดือนที่แล้ว/เปลี่ยนแปลง breakdown. `previousMonth()`
+    (`app.js`, handles year rollover — e.g. `'2026-01'` → `'2025-12'`) reruns the exact same
+    `computeExpectedSalary`/fixed-cost lookup one month back, so "last month" is always whatever
+    was actually saved for that prior month (zeros if nothing was ever entered, same as the current
+    month's own fallback). Each delta cell is wrapped in `.badge.overdue` (the same red badge class
+    used for overdue routines elsewhere) when the change is a positive increase, plain otherwise —
+    visually flagging rising costs without a separate color system. `formatDelta()` renders a
+    signed amount (`+฿500`/`-฿300`/`±฿0`), never a bare `formatCurrency()` call, so a decrease
+    doesn't read as ambiguous. This card has no form of its own — it's pure read-only derived
+    display, recomputed on every render from `state.fixedCosts` and `state.staff`/`state.attendance`
+    already loaded for the rest of the page, not a new Firestore read.

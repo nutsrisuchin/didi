@@ -28,6 +28,10 @@ const state = {
 };
 
 const THAI_WEEKDAY_SHORT = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'];
+const THAI_MONTH_FULL = [
+  'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
+  'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'
+];
 
 // Firestore values (staff.role, staff.employmentType, routine status) stay in
 // English since they're compared against directly (ROLE_ORDER, firestore.rules
@@ -59,6 +63,17 @@ function monthISO() {
   return new Date().toISOString().slice(0, 7);
 }
 
+function formatMonthLabel(monthValue) {
+  const [year, month] = monthValue.split('-').map(Number);
+  return `${THAI_MONTH_FULL[month - 1]} ${year}`;
+}
+
+function previousMonth(monthValue) {
+  const [year, month] = monthValue.split('-').map(Number);
+  const date = new Date(year, month - 2, 1); // month is 1-indexed; -2 lands on the prior month, rolling the year back too when needed
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+}
+
 function datesInMonth(monthValue) {
   const [year, month] = monthValue.split('-').map(Number);
   const daysInMonth = new Date(year, month, 0).getDate();
@@ -80,6 +95,11 @@ function roleAtLeast(minRole) {
 function formatCurrency(amount) {
   if (amount === null || amount === undefined) return '—';
   return `฿${Number(amount).toLocaleString('en-US')}`;
+}
+
+function formatDelta(amount) {
+  if (amount === 0) return '±฿0';
+  return `${amount > 0 ? '+' : '-'}${formatCurrency(Math.abs(amount))}`;
 }
 
 function formatDate(value) {
@@ -1375,6 +1395,35 @@ function renderFinancial() {
   const electricity = Number(fixedCost.electricity || 0);
   const fixedCostTotal = rent + water + electricity;
 
+  // Month-over-month comparison — reruns the same payroll/fixed-cost math
+  // one month back so the summary can show a delta per line, not just the
+  // current month's numbers in isolation.
+  const previousMonthValue = previousMonth(state.financialMonth);
+  const previousFixedCost = state.fixedCosts.find((entry) => entry.id === previousMonthValue) || {};
+  const previousRent = Number(previousFixedCost.rent || 0);
+  const previousWater = Number(previousFixedCost.water || 0);
+  const previousElectricity = Number(previousFixedCost.electricity || 0);
+  const previousFixedCostTotal = previousRent + previousWater + previousElectricity;
+  const previousGrandTotal = paidStaff.reduce(
+    (sum, employee) => sum + computeExpectedSalary(employee, previousMonthValue).total,
+    0
+  );
+  const combinedTotal = fixedCostTotal + grandTotal;
+  const previousCombinedTotal = previousFixedCostTotal + previousGrandTotal;
+
+  const comparisonRow = (label, current, previous, bold = false) => {
+    const delta = current - previous;
+    const cell = (value) => (bold ? `<strong>${value}</strong>` : value);
+    return `
+      <tr>
+        <td>${cell(label)}</td>
+        <td>${cell(formatCurrency(current))}</td>
+        <td>${cell(formatCurrency(previous))}</td>
+        <td><span class="badge ${delta > 0 ? 'overdue' : ''}">${formatDelta(delta)}</span></td>
+      </tr>
+    `;
+  };
+
   const rows = salaries.map(({ employee, total, workedDays, offDays }) => `
     <div class="list-item" style="flex-direction:column; align-items:stretch; gap:0.5rem;">
       <div class="row" style="justify-content:space-between">
@@ -1450,6 +1499,26 @@ function renderFinancial() {
             <tr><td><strong>รวม</strong></td><td><strong>${formatCurrency(fixedCostTotal)}</strong></td></tr>
           </tbody>
         </table>
+      </section>
+      <section class="card">
+        <div class="row" style="justify-content:space-between">
+          <h2 style="margin:0">สรุปค่าใช้จ่ายประจำเดือน</h2>
+          <span class="badge">รวมทั้งหมด ${formatCurrency(combinedTotal)}</span>
+        </div>
+        <p class="muted small" style="margin-top:0.5rem">เทียบกับเดือน ${formatMonthLabel(previousMonthValue)}</p>
+        <div style="overflow-x:auto; margin-top:0.5rem;">
+          <table class="schedule-summary-table">
+            <thead><tr><th>รายการ</th><th>เดือนนี้</th><th>เดือนที่แล้ว</th><th>เปลี่ยนแปลง</th></tr></thead>
+            <tbody>
+              ${comparisonRow('ค่าเช่า', rent, previousRent)}
+              ${comparisonRow('ค่าน้ำ', water, previousWater)}
+              ${comparisonRow('ค่าไฟ', electricity, previousElectricity)}
+              ${comparisonRow('ต้นทุนคงที่รวม', fixedCostTotal, previousFixedCostTotal)}
+              ${comparisonRow('เงินเดือนพนักงาน', grandTotal, previousGrandTotal)}
+              ${comparisonRow('รวมทั้งหมด', combinedTotal, previousCombinedTotal, true)}
+            </tbody>
+          </table>
+        </div>
       </section>
       <section class="card">
         <h2 style="margin-top:0">เงินเดือนที่คาดการณ์ต่อพนักงาน</h2>
