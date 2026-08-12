@@ -624,8 +624,14 @@ Firebase Storage" note above; images live inline on the docs below as base64 dat
 - **`fixedCosts`** (doc ID = the month string itself, `YYYY-MM` — deterministic like `attendance`'s
   `` `${date}_${staffId}` ``, so saving the same month twice upserts instead of duplicating):
   `month` (redundant with the doc ID, kept as a field too for query/display convenience, same
-  reasoning as `attendance.date`), `rent`, `water`, `electricity` (all plain numbers, THB),
-  `updatedAt`, `updatedBy` (acting user's Auth uid, same convention as `attendance.updatedBy`).
+  reasoning as `attendance.date`), `rent`, `water`, `electricity`, `resignationInternship` (ค่าลาออก
+  / ฝึกงาน — a combined line for staffing-transition costs, e.g. severance or intern stipends, not
+  split into two fields since it was asked for as one), `other` (อื่นๆ, catch-all) — all plain
+  numbers, THB. `resignationInternship` and `other` render with an empty input (`value="${fixedCost.x
+  ?? ''}"`, not `|| 0`) when unset, unlike `rent`/`water`/`electricity` which always show `0` —
+  deliberately left blank so these two optional, irregular line items don't read as "confirmed
+  zero" for a month nobody has actually entered them for yet. `updatedAt`, `updatedBy` (acting
+  user's Auth uid, same convention as `attendance.updatedBy`).
   Editable from a "ต้นทุนคงที่ประจำเดือน" card on the Financial view (`fixed-cost-form`,
   Admin+ only in `firestore.rules`, same access level as the rest of Financial — not restricted
   to the App Owner specifically, despite these being costs an owner would typically be the one
@@ -637,7 +643,8 @@ Firebase Storage" note above; images live inline on the docs below as base64 dat
   as a badge and broken out in a small summary table beneath the form (reusing the
   `schedule-summary-table` style rather than adding a new one purely for this).
   - **"สรุปค่าใช้จ่ายประจำเดือน"** (a separate card, directly below the fixed-cost card) combines
-    fixed costs *and* payroll into one month-over-month comparison: ค่าเช่า/ค่าน้ำ/ค่าไฟ, ต้นทุนคงที่รวม,
+    fixed costs *and* payroll into one month-over-month comparison: ค่าเช่า/ค่าน้ำ/ค่าไฟ/ค่าลาออก
+    ฝึกงาน/อื่นๆ, ต้นทุนคงที่รวม,
     เงินเดือนพนักงาน (the same `grandTotal` the per-employee list above already computes), and a
     bolded รวมทั้งหมด row — each with a เดือนนี้/เดือนที่แล้ว/เปลี่ยนแปลง breakdown. `previousMonth()`
     (`app.js`, handles year rollover — e.g. `'2026-01'` → `'2025-12'`) reruns the exact same

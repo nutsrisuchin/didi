@@ -1399,7 +1399,9 @@ function renderFinancial() {
   const rent = Number(fixedCost.rent || 0);
   const water = Number(fixedCost.water || 0);
   const electricity = Number(fixedCost.electricity || 0);
-  const fixedCostTotal = rent + water + electricity;
+  const resignationInternship = Number(fixedCost.resignationInternship || 0);
+  const other = Number(fixedCost.other || 0);
+  const fixedCostTotal = rent + water + electricity + resignationInternship + other;
 
   // Month-over-month comparison — reruns the same payroll/fixed-cost math
   // one month back so the summary can show a delta per line, not just the
@@ -1409,7 +1411,9 @@ function renderFinancial() {
   const previousRent = Number(previousFixedCost.rent || 0);
   const previousWater = Number(previousFixedCost.water || 0);
   const previousElectricity = Number(previousFixedCost.electricity || 0);
-  const previousFixedCostTotal = previousRent + previousWater + previousElectricity;
+  const previousResignationInternship = Number(previousFixedCost.resignationInternship || 0);
+  const previousOther = Number(previousFixedCost.other || 0);
+  const previousFixedCostTotal = previousRent + previousWater + previousElectricity + previousResignationInternship + previousOther;
   const previousGrandTotal = paidStaff.reduce(
     (sum, employee) => sum + computeExpectedSalary(employee, previousMonthValue).total,
     0
@@ -1493,6 +1497,14 @@ function renderFinancial() {
               ค่าไฟ (฿)
               <input name="electricity" type="number" min="0" value="${electricity}" />
             </label>
+            <label>
+              ค่าลาออก / ฝึกงาน (฿)
+              <input name="resignationInternship" type="number" min="0" value="${fixedCost.resignationInternship ?? ''}" placeholder="0" />
+            </label>
+            <label>
+              อื่นๆ (฿)
+              <input name="other" type="number" min="0" value="${fixedCost.other ?? ''}" placeholder="0" />
+            </label>
           </div>
           <button class="btn secondary" type="submit">บันทึกต้นทุนคงที่</button>
         </form>
@@ -1502,6 +1514,8 @@ function renderFinancial() {
             <tr><td>ค่าเช่า</td><td>${formatCurrency(rent)}</td></tr>
             <tr><td>ค่าน้ำ</td><td>${formatCurrency(water)}</td></tr>
             <tr><td>ค่าไฟ</td><td>${formatCurrency(electricity)}</td></tr>
+            <tr><td>ค่าลาออก / ฝึกงาน</td><td>${formatCurrency(resignationInternship)}</td></tr>
+            <tr><td>อื่นๆ</td><td>${formatCurrency(other)}</td></tr>
             <tr><td><strong>รวม</strong></td><td><strong>${formatCurrency(fixedCostTotal)}</strong></td></tr>
           </tbody>
         </table>
@@ -1519,6 +1533,8 @@ function renderFinancial() {
               ${comparisonRow('ค่าเช่า', rent, previousRent)}
               ${comparisonRow('ค่าน้ำ', water, previousWater)}
               ${comparisonRow('ค่าไฟ', electricity, previousElectricity)}
+              ${comparisonRow('ค่าลาออก / ฝึกงาน', resignationInternship, previousResignationInternship)}
+              ${comparisonRow('อื่นๆ', other, previousOther)}
               ${comparisonRow('ต้นทุนคงที่รวม', fixedCostTotal, previousFixedCostTotal)}
               ${comparisonRow('เงินเดือนพนักงาน', grandTotal, previousGrandTotal)}
               ${comparisonRow('รวมทั้งหมด', combinedTotal, previousCombinedTotal, true)}
@@ -1748,13 +1764,15 @@ async function handleForm(name, formData) {
       rent: Math.max(0, Number(formData.get('rent') || 0)),
       water: Math.max(0, Number(formData.get('water') || 0)),
       electricity: Math.max(0, Number(formData.get('electricity') || 0)),
+      resignationInternship: Math.max(0, Number(formData.get('resignationInternship') || 0)),
+      other: Math.max(0, Number(formData.get('other') || 0)),
       updatedAt: nowISO(),
       updatedBy: state.currentUser?.uid || ''
     };
     try {
       await DB.put('fixedCosts', record);
       upsertLocal('fixedCosts', record);
-      await pushNotification('อัปเดตต้นทุนคงที่', `${state.currentStaff?.name || ''} บันทึกค่าเช่า/ค่าน้ำ/ค่าไฟของเดือน ${state.financialMonth}`);
+      await pushNotification('อัปเดตต้นทุนคงที่', `${state.currentStaff?.name || ''} บันทึกต้นทุนคงที่ของเดือน ${state.financialMonth}`);
     } catch (error) {
       // Same class of bug as update-item-quantity: an unhandled rejection
       // here (e.g. permission-denied because firestore.rules in the Firebase
