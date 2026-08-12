@@ -275,6 +275,15 @@ changing permissions: `render()`'s nav gating, each `handleAction`/`handleForm` 
   contributes its own `pay`; **no record at all still contributes a full on-time day's pay** via
   `calculateDailyPay(dailyRate, 0, isHoliday)` — see the "default assumption" note above. There is
   no past/future distinction any more; the same rule applies uniformly to every day of the month.
+  After summing the daily amounts, `computeExpectedSalary` adds a flat
+  `MANAGER_TRANSPORT_ALLOWANCE` (300 THB) once per month for any employee whose `role ===
+  'Manager'` — **not** Employee/Admin/Owner, and **not** per day like everything else in this
+  function; it's added unconditionally regardless of days worked or off, since it's a fixed
+  monthly stipend rather than an attendance-linked bonus. This only affects the Financial payroll
+  projection, not the per-attendance-record `pay` field (`calculateDailyPay` is untouched) — so it
+  won't show up anywhere attendance `pay` is displayed directly, only in Financial's totals. The
+  per-employee row on Financial notes "รวมค่าเดินทาง ฿300/เดือน" under a Manager's worked/off-day
+  counts specifically so the allowance isn't a silent, unexplained +300 in their total.
 - Financial is also where `dailyRate` is edited (`update-employee-rate` action) — a mini-input +
   button per employee row, same convention as the Warehouse quantity editor. Editing pushes a
   notification naming who changed whose rate, same as attendance changes above.

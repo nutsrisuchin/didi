@@ -165,6 +165,12 @@ function calculateDailyPay(dailyRate, lateMinutes, isHoliday, closingDuty = fals
   return Math.max(0, gross - latePenalty + bonus);
 }
 
+// Flat monthly transportation allowance for Managers specifically (not
+// Employees, Admin, or Owner) — added once per month in computeExpectedSalary,
+// not per day, and unconditional on attendance/days-off since it's a fixed
+// monthly stipend rather than a worked-day bonus.
+const MANAGER_TRANSPORT_ALLOWANCE = 300;
+
 function isHolidayDate(dateValue) {
   return state.holidays.some((holiday) => holiday.date === dateValue);
 }
@@ -1387,6 +1393,7 @@ function computeExpectedSalary(employee, monthValue) {
       workedDays++;
     }
   });
+  if (employee.role === 'Manager') total += MANAGER_TRANSPORT_ALLOWANCE;
   return { total, workedDays, offDays };
 }
 
@@ -1440,7 +1447,7 @@ function renderFinancial() {
         <div>
           <strong>${employee.name}</strong>
           <div class="muted">${employmentTypeLabel(employee.employmentType)} · ${roleLabel(employee.role)}</div>
-          <div class="small">${workedDays} วันทำงาน, ${offDays} วันหยุด</div>
+          <div class="small">${workedDays} วันทำงาน, ${offDays} วันหยุด${employee.role === 'Manager' ? ` · รวมค่าเดินทาง ${formatCurrency(MANAGER_TRANSPORT_ALLOWANCE)}/เดือน` : ''}</div>
         </div>
         <strong>${formatCurrency(total)}</strong>
       </div>
