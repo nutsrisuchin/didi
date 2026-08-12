@@ -979,7 +979,7 @@ function renderWarehouse() {
   const canManage = roleAtLeast('Manager');
   const editMode = canManage && state.warehouseEditMode;
   const categories = Array.from(new Set(state.warehouseItems.map((item) => item.category || 'อื่นๆ')));
-  const categoryOptions = categories.map((category) => `<option value="${category}"></option>`).join('');
+  const categorySelectOptions = categories.map((category) => `<option value="${category}">${category}</option>`).join('');
   const groups = groupWarehouseItemsByCategory();
 
   const insights = state.warehouseItems.map((item) => ({ item, ...computeStockInsight(item) }));
@@ -1074,9 +1074,15 @@ function renderWarehouse() {
           <form data-form="item-form" class="stack">
             <div class="form-grid">
               <label>
-                หมวด
-                <input name="category" list="category-options" placeholder="เช่น เครื่องดื่ม" required />
-                <datalist id="category-options">${categoryOptions}</datalist>
+                หมวด (เลือกจากที่มีอยู่)
+                <select name="categorySelect">
+                  <option value="">-- เลือกหมวด --</option>
+                  ${categorySelectOptions}
+                </select>
+              </label>
+              <label>
+                หรือพิมพ์หมวดใหม่
+                <input name="categoryNew" placeholder="เช่น เครื่องดื่ม" />
               </label>
               <label>
                 ชื่อสินค้า
@@ -1678,7 +1684,10 @@ async function handleForm(name, formData) {
     const imageUrl = imageFile && imageFile.name ? await fileToCompressedDataUrl(imageFile) : '';
     const item = {
       id,
-      category: formData.get('category') || 'อื่นๆ',
+      // A newly-typed category wins over the dropdown pick, so someone
+      // adding a genuinely new category doesn't have to first clear a
+      // leftover dropdown selection.
+      category: formData.get('categoryNew') || formData.get('categorySelect') || 'อื่นๆ',
       name: formData.get('name'),
       unit: formData.get('unit'),
       quantity: Number(formData.get('quantity') || 0),

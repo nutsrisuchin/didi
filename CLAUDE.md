@@ -470,9 +470,18 @@ Firebase Storage" note above; images live inline on the docs below as base64 dat
   add-on already baked into `pay`; always explicitly `true`/`false` on every write, never left to
   merge-through, see Business logic section above), `updatedBy` (the acting user's Auth uid — set
   by every write path, see Business logic section above), `createdAt`.
-- **`warehouseItems`**: `category` (free text — no fixed category list, same convention as
-  `unit`; the Warehouse view groups items into collapsible sections by this field, falling
-  back to `'อื่นๆ'` when unset), `name`, `unit` (free text — no fixed unit list), `quantity`
+- **`warehouseItems`**: `category` (free text — no fixed/enforced category list server-side, same
+  convention as `unit`; the Warehouse view groups items into collapsible sections by this field,
+  falling back to `'อื่นๆ'` when unset). The "เพิ่มสินค้า" create-item form offers two ways to set
+  it — a `<select name="categorySelect">` populated from the distinct categories already in use (a
+  real dropdown, not a `<datalist>`, since iOS Safari's `<datalist>` support is inconsistent — see
+  the mobile-first rules below) and a plain `<input name="categoryNew">` for typing a brand-new
+  one; `item-form`'s handler prefers `categoryNew` over `categorySelect` when both are filled, so
+  someone adding a genuinely new category doesn't have to first clear a leftover dropdown pick.
+  This is purely a client-side convenience for reusing an existing spelling, not a schema
+  constraint — there's still no item-*editing* feature at all (only create/delete/quantity-update/
+  photo-update), so a category typo can only be fixed by deleting and recreating the item.
+  `name`, `unit` (free text — no fixed unit list), `quantity`
   (decimal, e.g. `1.5` for a partially-used pack), `imageUrl` (compressed base64 JPEG data URL,
   or `''` — settable at creation, and separately addable/replaceable later per-item via the
   Warehouse view's "เพิ่มรูป"/"เปลี่ยนรูป" control, `update-item-photo` action), `createdAt`,
