@@ -635,7 +635,8 @@ Firebase Storage" note above; images live inline on the docs below as base64 dat
   `month` (redundant with the doc ID, kept as a field too for query/display convenience, same
   reasoning as `attendance.date`), `rent`, `water`, `electricity`, `resignationInternship` (ค่าลาออก
   / ฝึกงาน — a combined line for staffing-transition costs, e.g. severance or intern stipends, not
-  split into two fields since it was asked for as one), `other` (อื่นๆ, catch-all) — all plain
+  split into two fields since it was asked for as one), `other` (labeled "อื่นๆ (shopee, ads, ect)"
+  in the UI — a catch-all for online-platform/marketing spend, not truly unlabeled misc) — all plain
   numbers, THB. `resignationInternship` and `other` render with an empty input (`value="${fixedCost.x
   ?? ''}"`, not `|| 0`) when unset, unlike `rent`/`water`/`electricity` which always show `0` —
   deliberately left blank so these two optional, irregular line items don't read as "confirmed

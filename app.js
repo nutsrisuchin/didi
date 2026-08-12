@@ -1509,7 +1509,7 @@ function renderFinancial() {
               <input name="resignationInternship" type="number" min="0" value="${fixedCost.resignationInternship ?? ''}" placeholder="0" />
             </label>
             <label>
-              อื่นๆ (฿)
+              อื่นๆ (shopee, ads, ect) (฿)
               <input name="other" type="number" min="0" value="${fixedCost.other ?? ''}" placeholder="0" />
             </label>
           </div>
@@ -1522,7 +1522,7 @@ function renderFinancial() {
             <tr><td>ค่าน้ำ</td><td>${formatCurrency(water)}</td></tr>
             <tr><td>ค่าไฟ</td><td>${formatCurrency(electricity)}</td></tr>
             <tr><td>ค่าลาออก / ฝึกงาน</td><td>${formatCurrency(resignationInternship)}</td></tr>
-            <tr><td>อื่นๆ</td><td>${formatCurrency(other)}</td></tr>
+            <tr><td>อื่นๆ (shopee, ads, ect)</td><td>${formatCurrency(other)}</td></tr>
             <tr><td><strong>รวม</strong></td><td><strong>${formatCurrency(fixedCostTotal)}</strong></td></tr>
           </tbody>
         </table>
@@ -1541,7 +1541,7 @@ function renderFinancial() {
               ${comparisonRow('ค่าน้ำ', water, previousWater)}
               ${comparisonRow('ค่าไฟ', electricity, previousElectricity)}
               ${comparisonRow('ค่าลาออก / ฝึกงาน', resignationInternship, previousResignationInternship)}
-              ${comparisonRow('อื่นๆ', other, previousOther)}
+              ${comparisonRow('อื่นๆ (shopee, ads, ect)', other, previousOther)}
               ${comparisonRow('ต้นทุนคงที่รวม', fixedCostTotal, previousFixedCostTotal)}
               ${comparisonRow('เงินเดือนพนักงาน', grandTotal, previousGrandTotal)}
               ${comparisonRow('รวมทั้งหมด', combinedTotal, previousCombinedTotal, true)}
