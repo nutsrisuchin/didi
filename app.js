@@ -1416,9 +1416,16 @@ function renderFinancial() {
   // in July's projection.
   const paidStaff = staffActiveInMonth(allPaidStaff, state.financialMonth);
   const salaries = paidStaff.map((employee) => ({ employee, ...computeExpectedSalary(employee, state.financialMonth) }));
-  const grandTotal = salaries.reduce((sum, entry) => sum + entry.total, 0);
+  const computedGrandTotal = salaries.reduce((sum, entry) => sum + entry.total, 0);
 
   const fixedCost = state.fixedCosts.find((entry) => entry.id === state.financialMonth) || {};
+  // Admin+ can override the payroll total shown for a month (set-payroll-override
+  // action, below) — e.g. to enter an actual paid amount that diverges from what
+  // attendance data computes. This never touches the per-employee breakdown list
+  // (`salaries`, still always the live computed figures) or the underlying
+  // attendance/pay records — it only substitutes for computedGrandTotal wherever
+  // "this month's payroll total" is used (badge, comparison table, combinedTotal).
+  const grandTotal = fixedCost.payrollOverride ?? computedGrandTotal;
   const rent = Number(fixedCost.rent || 0);
   const water = Number(fixedCost.water || 0);
   const electricity = Number(fixedCost.electricity || 0);
@@ -1438,10 +1445,11 @@ function renderFinancial() {
   const previousOther = Number(previousFixedCost.other || 0);
   const previousFixedCostTotal = previousRent + previousWater + previousElectricity + previousResignationInternship + previousOther;
   const previousPaidStaff = staffActiveInMonth(allPaidStaff, previousMonthValue);
-  const previousGrandTotal = previousPaidStaff.reduce(
+  const computedPreviousGrandTotal = previousPaidStaff.reduce(
     (sum, employee) => sum + computeExpectedSalary(employee, previousMonthValue).total,
     0
   );
+  const previousGrandTotal = previousFixedCost.payrollOverride ?? computedPreviousGrandTotal;
   const combinedTotal = fixedCostTotal + grandTotal;
   const previousCombinedTotal = previousFixedCostTotal + previousGrandTotal;
 
@@ -1457,6 +1465,22 @@ function renderFinancial() {
       </tr>
     `;
   };
+
+  // Admin+ can override the payroll total shown for a given month, in place of
+  // the value computeExpectedSalary derives from ลงเวลา attendance data — used
+  // for the "เงินเดือนพนักงาน" row specifically, current and previous month each
+  // editable independently since they're two separate fixedCosts docs.
+  const payrollCell = (monthValue, total, computedTotal, isOverridden) => `
+    <td style="white-space:normal;">
+      <div>${formatCurrency(total)}</div>
+      ${isOverridden ? `<div class="small muted">ปรับด้วยตนเอง (อัตโนมัติ: ${formatCurrency(computedTotal)})</div>` : ''}
+      <div class="row" style="margin-top:0.3rem; flex-wrap:wrap;">
+        <input class="mini-input" type="number" min="0" value="${total}" data-payroll-override-for="${monthValue}" />
+        <button class="btn secondary" data-action="set-payroll-override" data-month="${monthValue}">แก้ไข</button>
+        ${isOverridden ? `<button class="btn secondary" data-action="clear-payroll-override" data-month="${monthValue}">ใช้ค่าอัตโนมัติ</button>` : ''}
+      </div>
+    </td>
+  `;
 
   const rows = salaries.map(({ employee, total, workedDays, offDays }) => `
     <div class="list-item" style="flex-direction:column; align-items:stretch; gap:0.5rem;">
@@ -1560,7 +1584,12 @@ function renderFinancial() {
               ${comparisonRow('ค่าลาออก / ฝึกงาน', resignationInternship, previousResignationInternship)}
               ${comparisonRow('อื่นๆ (shopee, ads, ect)', other, previousOther)}
               ${comparisonRow('ต้นทุนคงที่รวม', fixedCostTotal, previousFixedCostTotal)}
-              ${comparisonRow('เงินเดือนพนักงาน', grandTotal, previousGrandTotal)}
+              <tr>
+                <td>เงินเดือนพนักงาน</td>
+                ${payrollCell(state.financialMonth, grandTotal, computedGrandTotal, fixedCost.payrollOverride != null)}
+                ${payrollCell(previousMonthValue, previousGrandTotal, computedPreviousGrandTotal, previousFixedCost.payrollOverride != null)}
+                <td><span class="badge ${(grandTotal - previousGrandTotal) > 0 ? 'overdue' : ''}">${formatDelta(grandTotal - previousGrandTotal)}</span></td>
+              </tr>
               ${comparisonRow('รวมทั้งหมด', combinedTotal, previousCombinedTotal, true)}
             </tbody>
           </table>
@@ -2313,6 +2342,61 @@ async function handleAction(action, data) {
     await DB.put('staff', record);
     upsertLocal('staff', record);
     await pushNotification('อัปเดตค่าจ้าง', `${state.currentStaff?.name || ''} ปรับค่าจ้างต่อวันของ ${employee.name} เป็น ${formatCurrency(dailyRate)}`);
+    render();
+    return;
+  }
+
+  if (action === 'set-payroll-override') {
+    if (!roleAtLeast('Admin')) return;
+    const month = data.month;
+    const input = document.querySelector(`[data-payroll-override-for="${month}"]`);
+    const value = Math.max(0, Number(input?.value ?? 0));
+    const confirmed = confirm(
+      `การแก้ไขนี้จะเขียนทับยอดเงินเดือนพนักงานที่คำนวณอัตโนมัติจากข้อมูลการลงเวลาในแท็บ "ลงเวลา" สำหรับเดือน ${formatMonthLabel(month)} ` +
+      `ด้วยตัวเลขที่ป้อนเอง (${formatCurrency(value)}) ยอดต่อพนักงานในรายการด้านล่างจะไม่เปลี่ยนแปลง มีผลเฉพาะยอดรวมในตารางนี้เท่านั้น ต้องการดำเนินการต่อหรือไม่?`
+    );
+    if (!confirmed) return;
+    const existing = state.fixedCosts.find((entry) => entry.id === month) || {};
+    const record = {
+      ...existing,
+      id: month,
+      month,
+      payrollOverride: value,
+      updatedAt: nowISO(),
+      updatedBy: state.currentUser?.uid || ''
+    };
+    try {
+      await DB.put('fixedCosts', record);
+      upsertLocal('fixedCosts', record);
+      await pushNotification(
+        'ปรับยอดเงินเดือนด้วยตนเอง',
+        `${state.currentStaff?.name || ''} ปรับยอดเงินเดือนพนักงานของเดือน ${formatMonthLabel(month)} เป็น ${formatCurrency(value)} (เขียนทับค่าที่คำนวณจากลงเวลา)`
+      );
+    } catch (error) {
+      console.error('set-payroll-override failed', error);
+      alert('บันทึกไม่สำเร็จ: ' + (error.message || error));
+    }
+    render();
+    return;
+  }
+
+  if (action === 'clear-payroll-override') {
+    if (!roleAtLeast('Admin')) return;
+    const month = data.month;
+    const existing = state.fixedCosts.find((entry) => entry.id === month);
+    if (!existing) return;
+    const record = { ...existing, payrollOverride: null, updatedAt: nowISO(), updatedBy: state.currentUser?.uid || '' };
+    try {
+      await DB.put('fixedCosts', record);
+      upsertLocal('fixedCosts', record);
+      await pushNotification(
+        'เปลี่ยนกลับเป็นยอดอัตโนมัติ',
+        `${state.currentStaff?.name || ''} เปลี่ยนยอดเงินเดือนพนักงานของเดือน ${formatMonthLabel(month)} กลับเป็นค่าที่คำนวณจากลงเวลา`
+      );
+    } catch (error) {
+      console.error('clear-payroll-override failed', error);
+      alert('ดำเนินการไม่สำเร็จ: ' + (error.message || error));
+    }
     render();
     return;
   }

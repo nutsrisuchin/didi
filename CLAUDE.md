@@ -303,6 +303,23 @@ changing permissions: `render()`'s nav gating, each `handleAction`/`handleForm` 
 - Financial is also where `dailyRate` is edited (`update-employee-rate` action) — a mini-input +
   button per employee row, same convention as the Warehouse quantity editor. Editing pushes a
   notification naming who changed whose rate, same as attendance changes above.
+- **Payroll total override**: on the "สรุปค่าใช้จ่ายประจำเดือน" comparison card's "เงินเดือนพนักงาน"
+  row, Admin+ can override the displayed total for either the current month or the previous month
+  independently (`set-payroll-override`/`clear-payroll-override` actions, `payrollCell()` helper in
+  `renderFinancial()`) — stored as `fixedCosts.payrollOverride` on that month's doc (`?? ` against
+  the live-computed total, so `0` is a valid override and is not confused with "no override"; `??`
+  specifically, not `||`). `set-payroll-override` shows a `confirm()` warning naming the month and
+  explicitly stating the override only affects this total, not the per-employee breakdown, before
+  writing — this is a real, deliberate divergence from the attendance-driven number, not something
+  to save silently. Once set, `grandTotal`/`previousGrandTotal` use the override everywhere they're
+  referenced (this row, `combinedTotal`, and the "การเงิน — เงินเดือนที่คาดการณ์" header badge above)
+  — **except** the "เงินเดือนที่คาดการณ์ต่อพนักงาน" per-employee list below, which always shows the
+  live `computeExpectedSalary()` figures regardless of any override, so the two sections can
+  legitimately disagree once a month has been overridden; the row itself shows both figures
+  ("ปรับด้วยตนเอง (อัตโนมัติ: ฿X)") specifically so that divergence isn't a silent surprise.
+  `clear-payroll-override` sets the field to `null` (not delete) to revert to the live-computed
+  figure — merge semantics on `DB.put` mean an explicit `null` write is needed, omitting the field
+  wouldn't clear a previously-set value.
 
 ## Notifications: client-triggered, not server-triggered
 
@@ -656,8 +673,10 @@ Firebase Storage" note above; images live inline on the docs below as base64 dat
   numbers, THB. `resignationInternship` and `other` render with an empty input (`value="${fixedCost.x
   ?? ''}"`, not `|| 0`) when unset, unlike `rent`/`water`/`electricity` which always show `0` —
   deliberately left blank so these two optional, irregular line items don't read as "confirmed
-  zero" for a month nobody has actually entered them for yet. `updatedAt`, `updatedBy` (acting
-  user's Auth uid, same convention as `attendance.updatedBy`).
+  zero" for a month nobody has actually entered them for yet. `payrollOverride` (number or `null`,
+  absent by default — see the Business logic section's "Payroll total override" note for how this
+  substitutes for the live-computed payroll total on this specific month). `updatedAt`, `updatedBy`
+  (acting user's Auth uid, same convention as `attendance.updatedBy`).
   Editable from a "ต้นทุนคงที่ประจำเดือน" card on the Financial view (`fixed-cost-form`,
   Admin+ only in `firestore.rules`, same access level as the rest of Financial — not restricted
   to the App Owner specifically, despite these being costs an owner would typically be the one
