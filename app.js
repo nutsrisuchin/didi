@@ -155,13 +155,13 @@ function scheduleFor(dateValue) {
 // Every employee (full-time and part-time) is paid a custom per-person day
 // rate now — no more fixed 440 base or monthly salary. No OT: pay is the
 // day rate regardless of exact hours worked, only reduced by lateness and
-// multiplied 1.5x on admin-marked holidays. closingDuty is a flat +50 THB
+// multiplied 1.5x on admin-marked holidays. closingDuty is a flat +40 THB
 // bonus for whoever closed the till that day ("ปิดบิลแทน") — added after
 // the holiday multiplier, not multiplied by it.
 function calculateDailyPay(dailyRate, lateMinutes, isHoliday, closingDuty = false) {
   const gross = Number(dailyRate || 0) * (isHoliday ? 1.5 : 1);
   const latePenalty = Math.ceil(lateMinutes / 60) * 40;
-  const bonus = closingDuty ? 50 : 0;
+  const bonus = closingDuty ? 40 : 0;
   return Math.max(0, gross - latePenalty + bonus);
 }
 
@@ -619,7 +619,7 @@ function renderScheduleModal() {
           ${dayOff
             ? `<button class="btn" data-action="clear-schedule-cell">ยกเลิกวันหยุด (กลับมาทำงานตามปกติ)</button>`
             : `<button class="btn danger" data-action="mark-schedule-dayoff">ทำเครื่องหมายวันหยุด</button>
-               <button class="btn secondary" data-action="toggle-closing-duty">${record?.closingDuty ? 'ยกเลิกปิดบิลแทน (-50 บาท)' : 'ปิดบิลแทน (+50 บาท)'}</button>`}
+               <button class="btn secondary" data-action="toggle-closing-duty">${record?.closingDuty ? 'ยกเลิกปิดบิลแทน (-40 บาท)' : 'ปิดบิลแทน (+40 บาท)'}</button>`}
         </div>
         ${dayOff ? '' : `
           <p class="small muted" style="margin:0.6rem 0 0">หรือระบุเวลาเข้า-ออกงานที่แน่นอน (เช่น มาสาย/ออกก่อน)</p>

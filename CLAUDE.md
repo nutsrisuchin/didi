@@ -253,12 +253,12 @@ changing permissions: `render()`'s nav gating, each `handleAction`/`handleForm` 
   reintroduce either without checking with the user first, since this is now a live payroll
   calculation people are actually paid from.
 - Pay formula (`calculateDailyPay(dailyRate, lateMinutes, isHoliday, closingDuty = false)`):
-  `max(0, dailyRate × (isHoliday ? 1.5 : 1) − ceil(lateMinutes/60)×40 + (closingDuty ? 50 : 0))`.
+  `max(0, dailyRate × (isHoliday ? 1.5 : 1) − ceil(lateMinutes/60)×40 + (closingDuty ? 40 : 0))`.
   `isHoliday` comes from `isHolidayDate(date)`, which checks the admin-maintained `holidays`
   collection (see Data model below) — there is no per-attendance-record checkbox for marking a
   day as a holiday, it's entirely driven by that date list. `closingDuty` ("ปิดบิลแทน" — closed
   the till that day) is the opposite: it **is** a per-attendance-record flag, toggled from the
-  schedule-cell modal's second button (`toggle-closing-duty` action), and the flat +50 THB bonus
+  schedule-cell modal's second button (`toggle-closing-duty` action), and the flat +40 THB bonus
   is added *after* the holiday multiplier, not multiplied by it. Every write path that can touch
   an existing record's `closingDuty` (`mark-attendance`, `save-schedule-cell`) explicitly reads
   and re-passes the prior value through — `DB.put` merges rather than overwrites, so silently
@@ -475,7 +475,7 @@ Firebase Storage" note above; images live inline on the docs below as base64 dat
   working"), `clockIn`, `clockOut` (both `null` when `dayOff` is true), `lateMinutes`,
   `workedHours` (display only, doesn't feed pay), `pay` (computed via `calculateDailyPay`, `0`
   when `dayOff`), `isHoliday` (bool, whether `calculateDailyPay` applied the 1.5x multiplier for
-  that date), `closingDuty` (bool, whether this person closed the till that day — a flat +50 THB
+  that date), `closingDuty` (bool, whether this person closed the till that day — a flat +40 THB
   add-on already baked into `pay`; always explicitly `true`/`false` on every write, never left to
   merge-through, see Business logic section above), `updatedBy` (the acting user's Auth uid — set
   by every write path, see Business logic section above), `createdAt`.
