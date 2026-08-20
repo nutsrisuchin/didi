@@ -216,6 +216,22 @@ changing permissions: `render()`'s nav gating, each `handleAction`/`handleForm` 
   exists-or-doesn't); the "assume working" behavior lives in the callers that interpret the
   result — `computeExpectedSalary()`, `renderMonthlySchedule()`, `renderScheduleSummary()` — not
   in the data layer itself.
+- **That "assume working" default only applies from a staff member's `createdAt` onward.**
+  `staffActiveInMonth(staffList, monthValue)` (`app.js`) filters out anyone hired after the last
+  day of `monthValue`, comparing `createdAt`'s date portion as a string (safe since ISO dates sort
+  lexicographically) against `datesInMonth(monthValue)`'s last entry. Without this, a staff member
+  hired in August would retroactively show up — with a full month of "assumed worked, on time" pay
+  — in July's schedule grid and payroll projection too, since nothing else about the month-picker
+  flow is aware of when someone was actually hired. Applied at the render-function call site, not
+  inside `renderMonthlySchedule()`/`renderScheduleSummary()`/`computeExpectedSalary()` themselves
+  (those still just take whatever staff list they're handed): `renderTimesheet()` filters by
+  `state.timesheetMonth` for both the Manager+ grid/summary and the Employee read-only grid, and
+  `renderFinancial()` filters by `state.financialMonth` for the current month **and separately**
+  re-filters by `previousMonth(state.financialMonth)` for the month-over-month comparison's "last
+  month" figures — reusing the current month's already-filtered list for the previous month's
+  total would reintroduce the same bug one month over. The **daily** quick-mark panel in
+  `renderTimesheet()` (today's attendance, not a specific past/future month) deliberately stays
+  unfiltered — it's always "today," so anyone currently active is correctly listed there.
 - Three ways an `attendance` record gets written, all producing the same doc shape:
   - **Quick daily mark** (Timesheet's "ภาพรวมการลงเวลา" section, `mark-attendance` action, itself
     behind a collapsed `<details>`/`<summary>` — `.schedule-daily-summary` in `styles.css` — so

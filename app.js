@@ -84,6 +84,17 @@ function datesInMonth(monthValue) {
   return dates;
 }
 
+// Excludes staff hired after the given month, so viewing a past month's
+// schedule/payroll doesn't retroactively show someone who hadn't been hired
+// yet (e.g. a staff member who started in August showing up in July's grid).
+// staffList is still the full active-staff list for "today"-scoped views
+// (the daily quick-mark panel) where this filtering doesn't apply.
+function staffActiveInMonth(staffList, monthValue) {
+  const dates = datesInMonth(monthValue);
+  const lastDayOfMonth = dates[dates.length - 1];
+  return staffList.filter((employee) => (employee.createdAt || '').slice(0, 10) <= lastDayOfMonth);
+}
+
 function nowISO() {
   return new Date().toISOString();
 }
@@ -728,6 +739,7 @@ function renderChangePinModal() {
 function renderTimesheet() {
   const canManage = roleAtLeast('Manager');
   const staffList = state.staff.filter((s) => s.employmentType);
+  const scheduleStaffList = staffActiveInMonth(staffList, state.timesheetMonth);
 
   // Employees see everyone's monthly schedule (read-only) so they know who's
   // on/off — but only the schedule grid, nothing else: no daily quick-mark
@@ -745,7 +757,7 @@ function renderTimesheet() {
             </label>
             <button class="btn" type="submit">ดู</button>
           </form>
-          <div style="overflow-x:auto; margin-top:0.8rem;">${renderMonthlySchedule(staffList, false)}</div>
+          <div style="overflow-x:auto; margin-top:0.8rem;">${renderMonthlySchedule(scheduleStaffList, false)}</div>
         </section>
       </div>
     `;
@@ -807,11 +819,11 @@ function renderTimesheet() {
           <button class="btn" type="submit">ดู</button>
         </form>
         <p class="muted small" style="margin-top:0.5rem">แตะที่ช่องเพื่อวางแผนหรือแก้ไขเวลาเข้า-ออกงานของแต่ละวัน ช่องสีแดงคือวันหยุด</p>
-        <div style="overflow-x:auto; margin-top:0.8rem;">${renderMonthlySchedule(staffList)}</div>
+        <div style="overflow-x:auto; margin-top:0.8rem;">${renderMonthlySchedule(scheduleStaffList)}</div>
       </section>
       <section class="card">
         <h2 style="margin-top:0">สรุปผลประจำเดือน</h2>
-        <div style="overflow-x:auto;">${renderScheduleSummary(staffList)}</div>
+        <div style="overflow-x:auto;">${renderScheduleSummary(scheduleStaffList)}</div>
       </section>
       <section class="card">
         <h2 style="margin-top:0">เพิ่มพนักงาน</h2>
@@ -1398,7 +1410,11 @@ function computeExpectedSalary(employee, monthValue) {
 }
 
 function renderFinancial() {
-  const paidStaff = state.staff.filter((person) => person.employmentType);
+  const allPaidStaff = state.staff.filter((person) => person.employmentType);
+  // Excludes anyone hired after the month being viewed, so a staff member who
+  // started in August doesn't retroactively show up (with a full month's pay)
+  // in July's projection.
+  const paidStaff = staffActiveInMonth(allPaidStaff, state.financialMonth);
   const salaries = paidStaff.map((employee) => ({ employee, ...computeExpectedSalary(employee, state.financialMonth) }));
   const grandTotal = salaries.reduce((sum, entry) => sum + entry.total, 0);
 
@@ -1421,7 +1437,8 @@ function renderFinancial() {
   const previousResignationInternship = Number(previousFixedCost.resignationInternship || 0);
   const previousOther = Number(previousFixedCost.other || 0);
   const previousFixedCostTotal = previousRent + previousWater + previousElectricity + previousResignationInternship + previousOther;
-  const previousGrandTotal = paidStaff.reduce(
+  const previousPaidStaff = staffActiveInMonth(allPaidStaff, previousMonthValue);
+  const previousGrandTotal = previousPaidStaff.reduce(
     (sum, employee) => sum + computeExpectedSalary(employee, previousMonthValue).total,
     0
   );
