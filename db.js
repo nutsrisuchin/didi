@@ -10,6 +10,24 @@ const auth = firebase.auth();
 const firestore = firebase.firestore();
 auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
 
+// Offline persistence: cache every doc this device has already seen in
+// IndexedDB, so on the next open each onSnapshot listener fires immediately
+// from the local cache instead of leaving the UI empty until the first
+// network round-trip returns (views render from `state`, which starts empty,
+// so a cold Firestore connection reads as "the app is slow"). The server
+// snapshot still arrives right after and overwrites anything that changed,
+// so this only changes how fast the *first* paint happens.
+// Must be called before any other Firestore use — hence here, at load, before
+// DB.watch/DB.put can run. It rejects rather than throwing synchronously, and
+// both documented failure modes are non-fatal: 'failed-precondition' (another
+// tab already holds the cache lease — rare with synchronizeTabs, but possible)
+// and 'unimplemented' (no usable IndexedDB, e.g. iOS Safari private browsing).
+// In either case Firestore keeps working exactly as before, just uncached, so
+// log and carry on rather than blocking login on it.
+firestore.enablePersistence({ synchronizeTabs: true }).catch((error) => {
+  console.warn('Firestore offline persistence unavailable', error && error.code, error);
+});
+
 const EMAIL_DOMAIN = 'didi-malatang.local';
 const OWNER_EMAIL = `owner@${EMAIL_DOMAIN}`;
 

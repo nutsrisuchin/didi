@@ -138,6 +138,21 @@ the repo/title still say "Didi Malatang Hub" for clarity, but the **UI itself no
   never get locked out even before any `staff` doc exists. On that account's first login,
   `ensureStaffDoc()` auto-creates its own `staff` doc.
 - `firebase.auth.Auth.Persistence.LOCAL` is used so login survives refreshes.
+- **Firestore offline persistence is enabled** (`firestore.enablePersistence({ synchronizeTabs: true })`
+  at the top of `db.js`, before any other Firestore call — the SDK requires that ordering). Every
+  doc this device has already seen is cached in IndexedDB, so on the next open each
+  `onSnapshot` listener fires immediately from cache and the UI paints with real data before the
+  first network round-trip returns, instead of rendering an empty `state` for a second or two.
+  The server snapshot lands right after and overwrites anything that changed, so this only
+  affects first-paint latency, not correctness. The `.catch` is deliberate and must stay: the
+  promise rejects with `failed-precondition` (another tab holds the cache lease) or
+  `unimplemented` (no usable IndexedDB — iOS Safari private browsing), and in both cases
+  Firestore keeps working uncached, so the failure is logged rather than surfaced or thrown.
+  `synchronizeTabs: true` is what makes multiple open tabs share one cache instead of the
+  second tab's `enablePersistence` failing outright — don't drop it. Side effect worth knowing:
+  writes now queue locally while offline and flush on reconnect, so a `DB.put` resolving is
+  even less of a guarantee the server accepted it than before (a rejected-by-rules write still
+  surfaces later, not at the call site — see the `update-item-quantity` try/catch note).
 
 ## Role-based access control (four roles)
 
