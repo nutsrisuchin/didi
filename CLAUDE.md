@@ -380,6 +380,31 @@ see the Warehouse Analytics and Business logic sections above for why those spec
 riskier to truncate), copy this same live-window-plus-manual-page-in shape rather than reaching
 for a different pattern.
 
+**Offline persistence is not a read-cost optimization** — don't reach for it as one, and don't
+let its presence suggest the read-cost problem above is already handled. Firestore bills a
+listener's reconnect against a resume token: resume within roughly 30 minutes of disconnecting
+and only genuinely-changed docs are billed, but past that window the reconnect is billed as a
+brand-new query — every doc in the watched collection, exactly as before persistence. The
+dominant real-world pattern here is staff opening the app the next morning, which is far outside
+that window, so the cache makes the UI *paint* instantly while the bill stays the same. (The one
+incidental saving: `synchronizeTabs` means several open tabs on a device share one set of
+listeners instead of each opening its own.) This was reasoned through with the user in October
+2026 when they asked directly whether persistence would cut their quota; the answer was no, and
+the conclusion was that the only lever that actually moves read volume is narrowing what the
+watchers subscribe to — the `notifications` live-window shape described above.
+
+If read cost ever does need attacking, the agreed order is **`attendance` first**, scoped to the
+viewed month rather than watched whole: it grows by roughly headcount × 30 docs every month,
+forever, and is the larger of the two candidates. The complication specific to it is that
+`state.financialMonth`/`state.timesheetMonth` let a user jump to an arbitrary month, and
+`renderFinancial()` additionally reads `previousMonth()` for its month-over-month card — so a
+month-scoped watcher has to cover two months at once and re-subscribe on every month change,
+which is a genuinely different shape from the `notifications` window (that one only ever extends
+in one direction and never re-subscribes). `warehouseLogs` is second and harder: `computeStockInsight`
+needs the *full* decline history per item to derive a usage rate, and the CSV export pivots every
+log ever recorded, so it can't be windowed by recency at all — per-item lazy loading would be the
+only real option. Neither has been built; this is the analysis, not a plan on the books.
+
 ## Language
 
 The UI is Thai throughout `index.html` and `app.js` — labels, buttons, headings, placeholders,
