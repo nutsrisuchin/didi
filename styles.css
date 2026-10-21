@@ -15,6 +15,11 @@
   --color-border-soft: #f7e9d7;
   --color-muted: #8a6a55;
   --color-danger: #7a1414;
+  /* Neutral gray for "not applicable" states — deliberately outside the warm
+     logo palette so an out-of-employment day reads as absent/inert rather
+     than as another warm-toned status like a day off or an overdue badge. */
+  --color-inactive-bg: #d4cfca;
+  --color-inactive-text: #6f6762;
   --color-overdue-bg: #ffe1d4;
   --color-overdue-text: #8a1414;
   background: var(--color-bg);
@@ -158,6 +163,19 @@ textarea { min-height: 5rem; resize: vertical; }
 .schedule-cell.late { color: var(--color-danger); font-weight: 700; }
 .schedule-cell.selected { outline: 2px solid var(--color-gold); outline-offset: -2px; }
 span.schedule-cell { cursor: default; }
+/* Outside the employment window (before เริ่มงาน / after ลาออก). Solid gray
+   and deliberately flat — distinct from .off (a scheduled day off, which the
+   person was employed for and which still counts in their off-day total).
+   Rendered as a non-interactive <span> even in the editable grid. */
+.schedule-cell.outside {
+  background: var(--color-inactive-bg);
+  color: var(--color-inactive-text);
+  cursor: not-allowed;
+  text-align: center;
+}
+/* Archived staff row on the Admin page — muted, but still legible, since the
+   row stays actionable (ยกเลิกการลาออก lives in it). */
+.list-item.archived { opacity: 0.7; }
 .schedule-daily-summary {
   cursor: pointer;
   font-weight: 600;

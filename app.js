@@ -84,15 +84,80 @@ function datesInMonth(monthValue) {
   return dates;
 }
 
-// Excludes staff hired after the given month, so viewing a past month's
-// schedule/payroll doesn't retroactively show someone who hadn't been hired
-// yet (e.g. a staff member who started in August showing up in July's grid).
-// staffList is still the full active-staff list for "today"-scoped views
-// (the daily quick-mark panel) where this filtering doesn't apply.
+// A staff member's employment window. startDate/endDate are set from the
+// schedule-cell modal (เริ่มงาน / ลาออก) and are the authority once present;
+// createdAt is the fallback for everyone who predates those fields, which is
+// why this isn't just a property read. endDate empty/absent means "still
+// employed" — an archived (resigned) person always has one.
+function employmentStart(employee) {
+  return (employee.startDate || employee.createdAt || '').slice(0, 10);
+}
+
+function employmentEnd(employee) {
+  return (employee.endDate || '').slice(0, 10);
+}
+
+// Both bounds are inclusive: someone who starts on the 15th is employed ON
+// the 15th, and someone who resigns on the 20th is employed through the end
+// of the 20th. ISO dates compare correctly as plain strings.
+function isEmployedOn(employee, dateStr) {
+  const start = employmentStart(employee);
+  const end = employmentEnd(employee);
+  if (start && dateStr < start) return false;
+  if (end && dateStr > end) return false;
+  return true;
+}
+
+function isCurrentlyEmployed(employee) {
+  return isEmployedOn(employee, todayISO());
+}
+
+// Whether a staff doc still grants use of the app. Archiving keeps the doc
+// (that's what preserves past months), so unlike the old hard delete it does
+// NOT by itself stop the person signing in — without this check an archived
+// employee would keep full access, since ensureStaffDoc resolves a role from
+// any staff doc that exists. Mirrored by isActiveStaff() in firestore.rules,
+// which is the actual enforcement; this is the client half.
+// The rule is "through the end of their last day": an endDate of today still
+// grants access today. Both the roster archive button and the modal's
+// ลาออก date go through this, so neither can drift from the other.
+// The stored `active` flag, derived from an end date. Kept as a real field
+// rather than computed on read so firestore.rules can check one boolean
+// without date arithmetic. It does go stale the day after someone's end date
+// (written while still true, read the next day when it should be false) —
+// which is exactly why staffHasAppAccess and the rule both re-check endDate
+// rather than trusting this flag alone.
+function activeFlagFor(endDate) {
+  return !endDate || endDate >= todayISO();
+}
+
+function staffHasAppAccess(employee) {
+  if (!employee) return false;
+  if (employee.active === false) return false;
+  const end = employmentEnd(employee);
+  return !end || end >= todayISO();
+}
+
+// Keeps a staff member in a month's grid/payroll if their employment window
+// overlaps that month at all, so a mid-month start or resignation still shows
+// the days they did work (the rest render as grayed-out non-days — see
+// renderMonthlySchedule). Excludes anyone hired after the month ends, which
+// stops a later hire retroactively showing a full month's assumed pay in an
+// earlier month, and anyone who left before it began. Note this deliberately
+// keeps *archived* staff visible in the past months they worked — that's the
+// whole point of archiving rather than deleting. "Today"-scoped views (the
+// daily quick-mark panel) filter with isCurrentlyEmployed instead.
 function staffActiveInMonth(staffList, monthValue) {
   const dates = datesInMonth(monthValue);
+  const firstDayOfMonth = dates[0];
   const lastDayOfMonth = dates[dates.length - 1];
-  return staffList.filter((employee) => (employee.createdAt || '').slice(0, 10) <= lastDayOfMonth);
+  return staffList.filter((employee) => {
+    const start = employmentStart(employee);
+    const end = employmentEnd(employee);
+    if (start && start > lastDayOfMonth) return false;
+    if (end && end < firstDayOfMonth) return false;
+    return true;
+  });
 }
 
 function nowISO() {
@@ -310,6 +375,15 @@ async function ensureStaffDoc(user) {
     });
     staffDoc = await DB.getOnce('staff', user.uid);
   }
+  // An archived (resigned) staff doc still exists — that's what keeps the
+  // person visible in past months — so resolving a role from "a doc exists"
+  // alone would let them keep using the app. Treat no-access the same as no
+  // doc: the caller signs them out with the standard error.
+  if (staffDoc && !staffHasAppAccess(staffDoc)) {
+    state.currentStaff = null;
+    state.currentRole = null;
+    return;
+  }
   state.currentStaff = staffDoc;
   state.currentRole = staffDoc ? staffDoc.role : null;
 }
@@ -317,10 +391,17 @@ async function ensureStaffDoc(user) {
 function refreshCurrentRole() {
   if (!state.currentUser) return;
   const doc = state.staff.find((entry) => entry.id === state.currentUser.uid);
-  if (doc) {
-    state.currentStaff = doc;
-    state.currentRole = doc.role;
+  if (!doc) return;
+  // Archiving someone from another device arrives here through the staff
+  // watcher, same as a role change does — so sign them out live rather than
+  // waiting for their next reload, matching how a role change already takes
+  // effect immediately without a refresh.
+  if (!staffHasAppAccess(doc)) {
+    DB.logout();
+    return;
   }
+  state.currentStaff = doc;
+  state.currentRole = doc.role;
 }
 
 function startWatchers() {
@@ -417,7 +498,7 @@ function renderSidebarSummary() {
   const unreadNotifications = state.notifications.filter((note) => !note.read).length;
   summary.innerHTML = `
     <div class="stat">
-      <strong>${state.staff.filter((s) => s.employmentType).length}</strong>
+      <strong>${state.staff.filter((s) => s.employmentType && isCurrentlyEmployed(s)).length}</strong>
       <span class="muted">พนักงานในระบบเงินเดือน</span>
     </div>
     <div class="stat">
@@ -547,6 +628,14 @@ function renderMonthlySchedule(staffList, interactive = true) {
     const dayNum = Number(dateStr.slice(8, 10));
     const schedule = scheduleFor(dateStr);
     const cells = staffList.map((employee) => {
+      // Outside the employment window (before เริ่มงาน / after ลาออก) the day
+      // isn't a working day at all — not a day off, which would imply they
+      // were employed and scheduled off. Rendered as an inert gray block even
+      // in the interactive grid, since there is nothing valid to record here;
+      // computeExpectedSalary and renderScheduleSummary skip these same days.
+      if (!isEmployedOn(employee, dateStr)) {
+        return '<td><span class="schedule-cell outside" aria-label="ไม่ได้อยู่ในช่วงการจ้างงาน">—</span></td>';
+      }
       const record = getAttendanceForDate(employee.id, dateStr);
       const dayOff = record?.dayOff === true;
       const selected = state.selectedScheduleCell
@@ -579,6 +668,7 @@ function renderScheduleSummary(staffList) {
     let off = 0;
     let late = 0;
     dates.forEach((dateStr) => {
+      if (!isEmployedOn(employee, dateStr)) return;
       const record = getAttendanceForDate(employee.id, dateStr);
       if (record?.dayOff) {
         off++;
@@ -621,6 +711,11 @@ function renderScheduleModal() {
   const record = getAttendanceForDate(staffId, date);
   const dayOff = record?.dayOff === true;
   const schedule = scheduleFor(date);
+  // The employment-window controls are Manager+ (the level that already adds
+  // and removes staff). Employees reach this modal only through the read-only
+  // grid, which renders no clickable cells at all, but gate the markup anyway
+  // so it never exists for them; handleAction re-checks regardless.
+  const canManage = roleAtLeast('Manager');
   return `
     <div class="modal-backdrop" data-close-action="close-schedule-cell">
       <div class="modal-card">
@@ -646,6 +741,24 @@ function renderScheduleModal() {
           </div>
           <button class="btn secondary" data-action="save-schedule-cell" style="margin-top:0.5rem">บันทึกเวลาที่แน่นอน</button>
         `}
+        ${canManage ? `
+          <hr style="margin:0.9rem 0; border:none; border-top:1px solid var(--color-border);" />
+          <p class="small muted" style="margin:0 0 0.5rem">ช่วงการจ้างงาน — วันก่อนเริ่มงานและหลังลาออกจะเป็นช่องสีเทา ไม่นับเงินเดือน</p>
+          <div class="form-grid">
+            <label>
+              เริ่มงานวันที่
+              <input type="date" id="employment-start-input" value="${employmentStart(employee)}" />
+            </label>
+            <label>
+              ลาออกวันที่
+              <input type="date" id="employment-end-input" value="${employmentEnd(employee)}" />
+            </label>
+          </div>
+          <div class="row" style="margin-top:0.5rem">
+            <button class="btn secondary" data-action="save-employment-dates">บันทึกช่วงการจ้างงาน</button>
+            ${employmentEnd(employee) ? `<button class="btn secondary" data-action="clear-employment-end">ยกเลิกการลาออก</button>` : ''}
+          </div>
+        ` : ''}
         <button class="btn secondary" style="margin-top:0.8rem; width:100%;" data-action="close-schedule-cell">ปิด</button>
       </div>
     </div>
@@ -739,7 +852,12 @@ function renderChangePinModal() {
 function renderTimesheet() {
   const canManage = roleAtLeast('Manager');
   const staffList = state.staff.filter((s) => s.employmentType);
+  // The monthly grid intentionally includes archived staff whose employment
+  // overlaps the viewed month, so past months still show who worked them.
   const scheduleStaffList = staffActiveInMonth(staffList, state.timesheetMonth);
+  // The daily quick-mark panel below is "today" — anyone who has left (or
+  // hasn't started yet) must not be markable, so it filters separately.
+  const todayStaffList = staffList.filter((employee) => isCurrentlyEmployed(employee));
 
   // Employees see everyone's monthly schedule (read-only) so they know who's
   // on/off — but only the schedule grid, nothing else: no daily quick-mark
@@ -767,7 +885,7 @@ function renderTimesheet() {
   // CLAUDE.md's RBAC section.
   const showSalary = roleAtLeast('Admin');
 
-  const rows = staffList.map((employee) => {
+  const rows = todayStaffList.map((employee) => {
     const entry = getAttendanceForDate(employee.id, state.currentDate);
     const schedule = scheduleFor(state.currentDate);
     return `
@@ -785,7 +903,7 @@ function renderTimesheet() {
           <input class="mini-input" type="time" value="${entry?.clockIn || schedule.start}" data-arrival-for="${employee.id}" />
           <button class="btn" data-action="mark-attendance" data-id="${employee.id}">บันทึกเข้างาน</button>
           <button class="btn secondary" data-action="clear-attendance" data-id="${employee.id}">ล้างข้อมูล</button>
-          ${employee.role === 'Employee' ? `<button class="btn danger" data-action="delete-staff" data-id="${employee.id}">ลบพนักงาน</button>` : ''}
+          ${employee.role === 'Employee' ? `<button class="btn danger" data-action="archive-staff" data-id="${employee.id}">บันทึกการลาออก</button>` : ''}
         </div>
       </div>
     `;
@@ -1317,26 +1435,42 @@ function renderRoutines() {
 }
 
 function renderAdmin() {
-  const rows = state.staff.map((person) => `
-    <div class="list-item">
+  // Archived (resigned) people stay listed rather than vanishing — their
+  // payroll history is still readable in past months, so hiding the row
+  // would leave no way to see who they were or to undo a mistaken archive.
+  // They're sorted last and clearly marked instead.
+  const sortedStaff = [...state.staff].sort((a, b) => {
+    const aOut = staffHasAppAccess(a) ? 0 : 1;
+    const bOut = staffHasAppAccess(b) ? 0 : 1;
+    return aOut - bOut;
+  });
+  const rows = sortedStaff.map((person) => {
+    const archived = !staffHasAppAccess(person);
+    const endDate = employmentEnd(person);
+    return `
+    <div class="list-item${archived ? ' archived' : ''}">
       <div>
-        <strong>${person.name}</strong>
+        <strong>${person.name}</strong>${archived ? ' <span class="badge overdue">ลาออกแล้ว</span>' : ''}
         <div class="muted">${roleLabel(person.role)}${person.employmentType ? ` · ${employmentTypeLabel(person.employmentType)} · ${formatCurrency(person.dailyRate)}/วัน` : ''}</div>
+        ${endDate ? `<div class="small muted">ลาออกวันที่ ${formatDate(endDate)} · ข้อมูลเดือนก่อนหน้ายังแสดงอยู่</div>` : ''}
       </div>
       ${person.role !== 'App Owner' ? `
         <div class="row">
           <button class="btn secondary" data-action="edit-staff" data-id="${person.id}">แก้ไข</button>
-          <button class="btn danger" data-action="delete-staff" data-id="${person.id}">ลบสิทธิ์การเข้าถึง</button>
+          ${archived
+            ? `<button class="btn secondary" data-action="restore-staff" data-id="${person.id}">ยกเลิกการลาออก</button>`
+            : `<button class="btn danger" data-action="archive-staff" data-id="${person.id}">ลาออก / ปิดการเข้าถึง</button>`}
         </div>
       ` : ''}
     </div>
-  `).join('');
+  `;
+  }).join('');
 
   return `
     <div class="grid">
       <section class="card">
         <h2 style="margin-top:0">จัดการผู้ดูแลระบบ</h2>
-        <p class="muted">การลบสิทธิ์จะลบเฉพาะโปรไฟล์ในแอป — บัญชีเข้าสู่ระบบเดิมไม่สามารถลบถาวรได้จากเบราว์เซอร์ ดังนั้นพนักงานที่ถูกลบจะไม่มีโปรไฟล์ให้เข้าสู่ระบบได้อีกต่อไป</p>
+        <p class="muted">การลาออกจะไม่ลบข้อมูล — บัญชีจะเข้าใช้งานแอปไม่ได้อีก แต่ชื่อและข้อมูลการทำงานยังแสดงในเดือนก่อนหน้า และสามารถยกเลิกการลาออกได้ภายหลัง (บัญชีเข้าสู่ระบบเดิมไม่สามารถลบถาวรได้จากเบราว์เซอร์)</p>
         <form data-form="staff-form" class="stack">
           <div class="form-grid">
             <label>
@@ -1394,6 +1528,11 @@ function computeExpectedSalary(employee, monthValue) {
   let workedDays = 0;
   let offDays = 0;
   datesInMonth(monthValue).forEach((dateStr) => {
+    // Days before เริ่มงาน or after ลาออก are not employment at all: they pay
+    // nothing and count as neither worked nor off, so a mid-month start or
+    // resignation produces a genuine part-month total rather than the full
+    // month the "assume working" default would otherwise produce.
+    if (!isEmployedOn(employee, dateStr)) return;
     const record = getAttendanceForDate(employee.id, dateStr);
     if (record?.dayOff) {
       offDays++;
@@ -1405,7 +1544,13 @@ function computeExpectedSalary(employee, monthValue) {
       workedDays++;
     }
   });
-  if (employee.role === 'Manager') total += MANAGER_TRANSPORT_ALLOWANCE;
+  // The transport allowance is a flat monthly stipend, but paying it in full
+  // to someone employed for none of the month would be wrong — and with the
+  // window filter above, a Manager whose employment doesn't overlap the month
+  // at all now reaches here with zero counted days. Pay it only if they were
+  // employed for at least one day. It is still NOT prorated across a partial
+  // month (see CLAUDE.md) — that would be a pay-policy change, not a bug fix.
+  if (employee.role === 'Manager' && (workedDays > 0 || offDays > 0)) total += MANAGER_TRANSPORT_ALLOWANCE;
   return { total, workedDays, offDays };
 }
 
@@ -1714,6 +1859,11 @@ async function createStaffMember(formData) {
     employmentType,
     dailyRate,
     active: true,
+    // Seeded to the creation date so the employment window is explicit from
+    // the start rather than relying on the createdAt fallback. Correct it
+    // from the schedule grid's เริ่มงาน field if someone is added late.
+    startDate: todayISO(),
+    endDate: null,
     createdAt: nowISO()
   };
   await DB.put('staff', record);
@@ -2248,17 +2398,118 @@ async function handleAction(action, data) {
     return;
   }
 
-  if (action === 'delete-staff') {
-    // Managers can only remove Employee-role staff; Admin/Owner can remove
-    // anyone but the App Owner. Firestore rules enforce the same split
-    // server-side, so a stale/forged client request is still rejected there.
+  if (action === 'save-employment-dates' || action === 'clear-employment-end') {
+    if (!roleAtLeast('Manager')) return;
+    if (!state.selectedScheduleCell) return;
+    const { staffId } = state.selectedScheduleCell;
+    const person = state.staff.find((entry) => entry.id === staffId);
+    if (!person) return;
+    // Same split as delete/archive below: a Manager may only touch Employee
+    // profiles, Admin+ anyone but the App Owner. Mirrored in firestore.rules.
+    if (person.role === 'App Owner') return;
+    if (!roleAtLeast('Admin') && person.role !== 'Employee') return;
+
+    let startDate = employmentStart(person);
+    let endDate = '';
+    if (action === 'save-employment-dates') {
+      startDate = (document.querySelector('#employment-start-input')?.value || '').trim();
+      endDate = (document.querySelector('#employment-end-input')?.value || '').trim();
+      if (!startDate) {
+        alert('กรุณาระบุวันเริ่มงาน');
+        return;
+      }
+      if (endDate && endDate < startDate) {
+        alert('วันลาออกต้องไม่อยู่ก่อนวันเริ่มงาน');
+        return;
+      }
+    }
+
+    // An end date is what archives someone: they drop out of today-scoped
+    // views and future months but stay in every past month they worked.
+    // Setting one therefore gets a confirm naming the person and the date —
+    // it revokes their access (see the active/endDate check in the auth gate
+    // and firestore.rules), even though nothing is destroyed and clearing the
+    // date restores them, which is why this is one confirm and not the two
+    // confirmDeleteTwice requires for genuinely permanent deletes.
+    if (endDate && endDate !== employmentEnd(person)) {
+      if (!confirm(`บันทึกการลาออกของ "${person.name}" วันที่ ${formatDate(endDate)} ใช่หรือไม่?
+
+หลังจากวันดังกล่าว บัญชีนี้จะเข้าใช้งานแอปไม่ได้ แต่ข้อมูลเดือนก่อนหน้าจะยังแสดงอยู่ตามเดิม`)) return;
+    }
+
+    const updated = {
+      ...person,
+      startDate,
+      endDate: endDate || null,
+      // Mirrors endDate so the auth gate and the security rules have a single
+      // boolean to check rather than re-deriving "has their last day passed"
+      // in two languages. Recomputed on every save, so clearing a resignation
+      // reactivates the account in the same write.
+      active: activeFlagFor(endDate)
+    };
+    await DB.put('staff', updated);
+    upsertLocal('staff', updated);
+    if (action === 'clear-employment-end') {
+      pushNotification('ยกเลิกการลาออก', `${state.currentStaff?.name || 'ผู้ใช้'} ยกเลิกการลาออกของ ${person.name}`);
+    } else if (endDate) {
+      pushNotification('บันทึกการลาออก', `${state.currentStaff?.name || 'ผู้ใช้'} บันทึกการลาออกของ ${person.name} วันที่ ${formatDate(endDate)}`);
+    } else {
+      pushNotification('อัปเดตวันเริ่มงาน', `${state.currentStaff?.name || 'ผู้ใช้'} ตั้งวันเริ่มงานของ ${person.name} เป็น ${formatDate(startDate)}`);
+    }
+    state.selectedScheduleCell = null;
+    render();
+    return;
+  }
+
+  if (action === 'restore-staff') {
+    // Undo for an archive — clears the end date and reactivates. Same role
+    // split as archiving itself, mirrored in firestore.rules.
     if (!roleAtLeast('Manager')) return;
     const person = state.staff.find((entry) => entry.id === data.id);
     if (!person || person.role === 'App Owner') return;
     if (!roleAtLeast('Admin') && person.role !== 'Employee') return;
-    if (!confirmDeleteTwice(`ต้องการลบสิทธิ์การเข้าถึงของ "${person.name}" ใช่หรือไม่?`)) return;
-    await DB.del('staff', data.id);
-    removeLocal('staff', data.id);
+    if (!confirm(`ยกเลิกการลาออกของ "${person.name}" และเปิดให้เข้าใช้งานอีกครั้งใช่หรือไม่?`)) return;
+    const restored = { ...person, endDate: null, active: true };
+    await DB.put('staff', restored);
+    upsertLocal('staff', restored);
+    pushNotification('ยกเลิกการลาออก', `${state.currentStaff?.name || 'ผู้ใช้'} ยกเลิกการลาออกของ ${person.name}`);
+    render();
+    return;
+  }
+
+  if (action === 'archive-staff') {
+    // Archives rather than deletes. This used to be DB.del on the staff doc,
+    // which permanently destroyed the person's name/role/rate and so erased
+    // them from every past month's grid and payroll — their attendance docs
+    // survived but had nothing to join against. Setting an end date instead
+    // keeps all of that readable while removing them from today's views,
+    // future months, and (via active:false) the app itself. Nothing is
+    // destroyed, so this is reversible from the schedule-cell modal's
+    // "ยกเลิกการลาออก" button, which is also why it asks once rather than
+    // going through confirmDeleteTwice.
+    // Managers can only archive Employee-role staff; Admin/Owner anyone but
+    // the App Owner. firestore.rules enforces the same split server-side.
+    if (!roleAtLeast('Manager')) return;
+    const person = state.staff.find((entry) => entry.id === data.id);
+    if (!person || person.role === 'App Owner') return;
+    if (!roleAtLeast('Admin') && person.role !== 'Employee') return;
+    const today = todayISO();
+    if (!confirm(`บันทึกการลาออกของ "${person.name}" วันที่ ${formatDate(today)} ใช่หรือไม่?
+
+บัญชีนี้จะเข้าใช้งานแอปไม่ได้อีก แต่ข้อมูลการทำงานในเดือนก่อนหน้าจะยังแสดงอยู่ ถ้าต้องการวันลาออกอื่น ให้ตั้งค่าในตารางเวลาประจำเดือน`)) return;
+    const archived = {
+      ...person,
+      startDate: employmentStart(person),
+      endDate: today,
+      // Same rule the modal's ลาออก date uses, so the two write paths can't
+      // drift: an end date of today means access lasts through the end of
+      // that day. To cut access immediately, set an earlier date from the
+      // schedule grid instead.
+      active: activeFlagFor(today)
+    };
+    await DB.put('staff', archived);
+    upsertLocal('staff', archived);
+    pushNotification('บันทึกการลาออก', `${state.currentStaff?.name || 'ผู้ใช้'} บันทึกการลาออกของ ${person.name} วันที่ ${formatDate(today)}`);
     render();
     return;
   }

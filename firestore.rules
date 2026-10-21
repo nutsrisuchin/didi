@@ -15,8 +15,40 @@ service cloud.firestore {
       return isSignedIn() && request.auth.token.email == 'owner@didi-malatang.local';
     }
 
+    function myStaff() {
+      return get(/databases/$(database)/documents/staff/$(request.auth.uid)).data;
+    }
+
     function myRole() {
-      return get(/databases/$(database)/documents/staff/$(request.auth.uid)).data.role;
+      return myStaff().role;
+    }
+
+    // Whether the caller's own end date (ลาออก) is in the past. Parsed rather
+    // than string-compared: rules have no reliable way to format request.time
+    // back into a 'YYYY-MM-DD' string, so the stored date is split into parts
+    // and rebuilt as a timestamp. Both sides are UTC midnight, which at UTC+7
+    // means access lapses a few hours after local midnight — erring toward
+    // letting someone finish a shift, never toward locking them out early.
+    function endDatePassed() {
+      return 'endDate' in myStaff()
+        && myStaff().endDate != null
+        && timestamp.date(
+             int(myStaff().endDate.split('-')[0]),
+             int(myStaff().endDate.split('-')[1]),
+             int(myStaff().endDate.split('-')[2])
+           ) < request.time.date();
+    }
+
+    // Archiving a staff member keeps their doc — that doc is what makes them
+    // still visible in the past months they worked — so unlike the old hard
+    // delete it does not implicitly revoke access: the role lookup above still
+    // succeeds. Without this check an archived person would keep full
+    // server-side access, a strict regression, which is why this and the
+    // client-side staffHasAppAccess() must ship together. The stored active
+    // flag alone isn't trusted: it's written at archive time and goes stale the
+    // day after an end date set in the future, so the date is re-checked too.
+    function isActiveStaff() {
+      return myStaff().active != false && !endDatePassed();
     }
 
     function roleRank(role) {
@@ -24,7 +56,7 @@ service cloud.firestore {
     }
 
     function roleAtLeast(minRole) {
-      return isSignedIn() && (isOwnerEmail() || roleRank(myRole()) >= roleRank(minRole));
+      return isSignedIn() && (isOwnerEmail() || (isActiveStaff() && roleRank(myRole()) >= roleRank(minRole)));
     }
 
     match /staff/{staffId} {

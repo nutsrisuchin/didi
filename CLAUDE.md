@@ -231,7 +231,7 @@ changing permissions: `render()`'s nav gating, each `handleAction`/`handleForm` 
   exists-or-doesn't); the "assume working" behavior lives in the callers that interpret the
   result — `computeExpectedSalary()`, `renderMonthlySchedule()`, `renderScheduleSummary()` — not
   in the data layer itself.
-- **That "assume working" default only applies from a staff member's `createdAt` onward.**
+- **That "assume working" default only applies inside a staff member's employment window.**
   `staffActiveInMonth(staffList, monthValue)` (`app.js`) filters out anyone hired after the last
   day of `monthValue`, comparing `createdAt`'s date portion as a string (safe since ISO dates sort
   lexicographically) against `datesInMonth(monthValue)`'s last entry. Without this, a staff member
@@ -245,8 +245,41 @@ changing permissions: `render()`'s nav gating, each `handleAction`/`handleForm` 
   re-filters by `previousMonth(state.financialMonth)` for the month-over-month comparison's "last
   month" figures — reusing the current month's already-filtered list for the previous month's
   total would reintroduce the same bug one month over. The **daily** quick-mark panel in
-  `renderTimesheet()` (today's attendance, not a specific past/future month) deliberately stays
-  unfiltered — it's always "today," so anyone currently active is correctly listed there.
+  `renderTimesheet()` (today's attendance, not a specific past/future month) filters by
+  `isCurrentlyEmployed` instead — it's always "today," so it must exclude anyone who has left or
+  not yet started, but not apply the month logic.
+- **Employment window: `staff.startDate` / `staff.endDate`** (both `YYYY-MM-DD`; `endDate` is
+  `null` while employed). Set from the schedule-cell modal's เริ่มงาน / ลาออก date inputs
+  (`save-employment-dates`, Manager+ — same role split as archiving: a Manager may only touch
+  Employee-role profiles). `employmentStart()` falls back to `createdAt` for records predating
+  these fields, so don't read `startDate` directly; `isEmployedOn(employee, date)` is the single
+  predicate every caller uses. **Both bounds are inclusive** — someone starting on the 15th is
+  employed on the 15th, someone resigning on the 20th is employed through the 20th.
+  Days outside the window are a third state, distinct from both "worked" and "day off": they
+  render as an inert gray `.schedule-cell.outside` `<span>` (never a button, even in the
+  editable grid), count as neither worked nor off in `renderScheduleSummary()`, and are skipped
+  entirely by `computeExpectedSalary()` — which is what makes a mid-month start or resignation
+  pay a genuine part-month instead of the full month the "assume working" default would produce.
+  The Manager transport allowance is paid only if at least one day of the month falls inside the
+  window, but is still **not prorated** across a partial month — that would be a pay-policy
+  change, not a bug.
+- **Removing staff archives, it does not delete** (`archive-staff`, renamed from `delete-staff`).
+  It sets `endDate` + `active` and keeps the `staff` doc; it used to `DB.del` the doc, which
+  destroyed the person's name/role/rate and so erased them from every past month's grid and
+  payroll (their `attendance` docs survived with nothing to join against). Because the doc now
+  survives, **archiving had to be taught to revoke access separately** — `ensureStaffDoc` and
+  `refreshCurrentRole` both check `staffHasAppAccess()`, and `firestore.rules` gained
+  `isActiveStaff()` inside `roleAtLeast()`. Without that rules change an archived employee keeps
+  full server-side access, since a role resolves from any staff doc that exists — a strict
+  regression against the old hard delete, where the role lookup simply failed. Treat the client
+  and rules halves as one change; shipping the first without the second is a security hole.
+  Archiving is reversible (`restore-staff`, and the modal's "ยกเลิกการลาออก"), which is why it
+  asks once rather than going through `confirmDeleteTwice`. **Anyone hard-deleted before this
+  change is unrecoverable** — their attendance rows are orphaned and their name is gone.
+  `activeFlagFor(endDate)` is the one place the `active` boolean is computed, used by both write
+  paths so they can't drift; it is deliberately re-derived rather than trusted on read, since a
+  flag written with a future end date goes stale the day after that date — both
+  `staffHasAppAccess()` and the rule re-check the date itself for exactly this reason.
 - Three ways an `attendance` record gets written, all producing the same doc shape:
   - **Quick daily mark** (Timesheet's "ภาพรวมการลงเวลา" section, `mark-attendance` action, itself
     behind a collapsed `<details>`/`<summary>` — `.schedule-daily-summary` in `styles.css` — so
@@ -513,7 +546,7 @@ Restaurant staff use this on their phones, so these are checked for every new UI
   `app.js` — two separate native `confirm()` prompts in a row, not one. Deletes in this app are
   permanent (no undo, no trash/recycle bin), so this was an explicit user request for more
   friction than the single "are you sure?" pattern most apps use. Applies to `delete-item`,
-  `delete-routine`, `delete-staff`, `delete-holiday` — any new delete action added later should
+  `delete-routine`, `delete-holiday` — any new delete action added later should
   follow the same pattern, with a message naming the specific thing being deleted (not a generic
   "are you sure?").
 - Commits are created only when explicitly asked, generally batched into one commit per
@@ -536,7 +569,8 @@ Firebase Storage" note above; images live inline on the docs below as base64 dat
 
 - **`staff`** (doc ID = Auth `uid`): `name`, `role` (`App Owner`/`Admin`/`Manager`/`Employee`),
   `employmentType` (`full-time`/`part-time`/`''` for non-hourly Owner/Admin accounts),
-  `dailyRate` (per-employee day rate in THB, set at creation, `null` when `employmentType` is
+  `startDate`/`endDate` (employment window, see Business logic above — `endDate` non-null means
+  archived/resigned), `dailyRate` (per-employee day rate in THB, set at creation, `null` when `employmentType` is
   `''` — see Business logic section above; this replaced a fixed-monthly `salary` field), `active`,
   `createdAt`. One collection covers both "employee for payroll" and "login account with a
   role" — the Timesheet page's "Add employee" form and the Admin page's "Add account" form both
