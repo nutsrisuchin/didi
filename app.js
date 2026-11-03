@@ -170,7 +170,7 @@ function roleAtLeast(minRole) {
 
 function formatCurrency(amount) {
   if (amount === null || amount === undefined) return '—';
-  return `฿${Number(amount).toLocaleString('en-US')}`;
+  return `฿${Number(amount).toLocaleString('en-US', { maximumFractionDigits: 2 })}`;
 }
 
 function formatDelta(amount) {
@@ -804,7 +804,7 @@ function renderStaffEditModal() {
           </label>
           <label>
             ค่าจ้างต่อวัน (฿, เฉพาะพนักงาน)
-            <input id="staff-edit-daily-rate" type="number" min="0" value="${person.dailyRate ?? 0}" />
+            <input id="staff-edit-daily-rate" type="number" min="0" step="0.01" value="${person.dailyRate ?? 0}" />
           </label>
         </div>
         <div class="row" style="margin-top:0.8rem">
@@ -968,7 +968,7 @@ function renderTimesheet() {
               ${showSalary ? `
                 <label>
                   ค่าจ้างต่อวัน (฿)
-                  <input name="dailyRate" type="number" min="0" value="380" required />
+                  <input name="dailyRate" type="number" min="0" step="0.01" value="380" required />
                 </label>
               ` : ''}
               <label>
@@ -1496,7 +1496,7 @@ function renderAdmin() {
             </label>
             <label>
               ค่าจ้างต่อวัน (฿, เฉพาะพนักงาน)
-              <input name="dailyRate" type="number" min="0" value="380" />
+              <input name="dailyRate" type="number" min="0" step="0.01" value="380" />
             </label>
             <label>
               รหัส PIN สำหรับเข้าสู่ระบบ
@@ -1620,7 +1620,7 @@ function renderFinancial() {
       <div>${formatCurrency(total)}</div>
       ${isOverridden ? `<div class="small muted">ปรับด้วยตนเอง (อัตโนมัติ: ${formatCurrency(computedTotal)})</div>` : ''}
       <div class="row" style="margin-top:0.3rem; flex-wrap:wrap;">
-        <input class="mini-input" type="number" min="0" value="${total}" data-payroll-override-for="${monthValue}" />
+        <input class="mini-input" type="number" min="0" step="0.01" value="${total}" data-payroll-override-for="${monthValue}" />
         <button class="btn secondary" data-action="set-payroll-override" data-month="${monthValue}">แก้ไข</button>
         ${isOverridden ? `<button class="btn secondary" data-action="clear-payroll-override" data-month="${monthValue}">ใช้ค่าอัตโนมัติ</button>` : ''}
       </div>
@@ -1638,7 +1638,7 @@ function renderFinancial() {
         <strong>${formatCurrency(total)}</strong>
       </div>
       <div class="row">
-        <input class="mini-input" type="number" min="0" value="${employee.dailyRate ?? 0}" data-rate-for="${employee.id}" />
+        <input class="mini-input" type="number" min="0" step="0.01" value="${employee.dailyRate ?? 0}" data-rate-for="${employee.id}" />
         <span class="muted small">฿/วัน</span>
         <button class="btn secondary" data-action="update-employee-rate" data-id="${employee.id}">อัปเดตค่าจ้าง</button>
       </div>
@@ -1680,23 +1680,23 @@ function renderFinancial() {
           <div class="form-grid">
             <label>
               ค่าเช่า (฿)
-              <input name="rent" type="number" min="0" value="${rent}" />
+              <input name="rent" type="number" min="0" step="0.01" value="${rent}" />
             </label>
             <label>
               ค่าน้ำ (฿)
-              <input name="water" type="number" min="0" value="${water}" />
+              <input name="water" type="number" min="0" step="0.01" value="${water}" />
             </label>
             <label>
               ค่าไฟ (฿)
-              <input name="electricity" type="number" min="0" value="${electricity}" />
+              <input name="electricity" type="number" min="0" step="0.01" value="${electricity}" />
             </label>
             <label>
-              ค่าลาออก / ฝึกงาน (฿)
-              <input name="resignationInternship" type="number" min="0" value="${fixedCost.resignationInternship ?? ''}" placeholder="0" />
+              ค่า Makro และ อื่นๆ (฿)
+              <input name="resignationInternship" type="number" min="0" step="0.01" value="${fixedCost.resignationInternship ?? ''}" placeholder="0" />
             </label>
             <label>
               อื่นๆ (shopee, ads, ect) (฿)
-              <input name="other" type="number" min="0" value="${fixedCost.other ?? ''}" placeholder="0" />
+              <input name="other" type="number" min="0" step="0.01" value="${fixedCost.other ?? ''}" placeholder="0" />
             </label>
           </div>
           <button class="btn secondary" type="submit">บันทึกต้นทุนคงที่</button>
@@ -1707,7 +1707,7 @@ function renderFinancial() {
             <tr><td>ค่าเช่า</td><td>${formatCurrency(rent)}</td></tr>
             <tr><td>ค่าน้ำ</td><td>${formatCurrency(water)}</td></tr>
             <tr><td>ค่าไฟ</td><td>${formatCurrency(electricity)}</td></tr>
-            <tr><td>ค่าลาออก / ฝึกงาน</td><td>${formatCurrency(resignationInternship)}</td></tr>
+            <tr><td>ค่า Makro และ อื่นๆ</td><td>${formatCurrency(resignationInternship)}</td></tr>
             <tr><td>อื่นๆ (shopee, ads, ect)</td><td>${formatCurrency(other)}</td></tr>
             <tr><td><strong>รวม</strong></td><td><strong>${formatCurrency(fixedCostTotal)}</strong></td></tr>
           </tbody>
@@ -1726,7 +1726,7 @@ function renderFinancial() {
               ${comparisonRow('ค่าเช่า', rent, previousRent)}
               ${comparisonRow('ค่าน้ำ', water, previousWater)}
               ${comparisonRow('ค่าไฟ', electricity, previousElectricity)}
-              ${comparisonRow('ค่าลาออก / ฝึกงาน', resignationInternship, previousResignationInternship)}
+              ${comparisonRow('ค่า Makro และ อื่นๆ', resignationInternship, previousResignationInternship)}
               ${comparisonRow('อื่นๆ (shopee, ads, ect)', other, previousOther)}
               ${comparisonRow('ต้นทุนคงที่รวม', fixedCostTotal, previousFixedCostTotal)}
               <tr>
