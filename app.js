@@ -73,6 +73,25 @@ const DUTY_OPTIONS = [
 // "จัดถาด" shorthand (day 9, กิ๊ก) is recorded as จัดถาดเหล็ก like every other
 // cell, since nothing else in the sheet distinguishes the two.
 const DUTY_SHEET_IMPORT_NAMES = ['ข้าว', 'ปาย', 'พี่มาย', 'กิ๊ก', 'บิว', 'เลิฟ'];
+// What each sheet column's person is actually called in the app, as the shop
+// owner confirmed them: the sheet uses handwritten nicknames, the accounts use
+// a different spelling (ปลาย) or the Latin form (Kik/Bew/Love). These only
+// pre-select the import modal's dropdowns — the dropdown is still the decision,
+// so an alias going stale means one extra tap, not a wrong person's roster.
+const DUTY_SHEET_NAME_ALIASES = {
+  'ปาย': ['ปลาย'],
+  'พี่มาย': ['มาย'],
+  'กิ๊ก': ['Kik'],
+  'บิว': ['Bew'],
+  'เลิฟ': ['Love']
+};
+
+// Case-insensitive so a Latin nickname saved as "kik" or "KIK" still matches.
+function matchStaffForSheetName(candidates, sheetName) {
+  const wanted = [sheetName, ...(DUTY_SHEET_NAME_ALIASES[sheetName] || [])]
+    .map((name) => name.trim().toLowerCase());
+  return candidates.find((person) => wanted.includes((person.name || '').trim().toLowerCase())) || null;
+}
 const DUTY_SHEET_IMPORT_ROWS = [
   [['เข้าบ่าย', 'ทำซุป'], ['จัดถาดเหล็ก', 'กวาดถูครัว', 'ผัดแห้ง', 'ทอด'], null, ['จัดผัก', 'ของน้ำ', 'โซนน้ำซุป', 'เครื่องปรุง', 'กวาดถูครัว'], ['รีดน้ำ', 'ขึ้นถาดเหล็ก', 'เติมของ'], ['คอยเสริม']],
   [['จัดผัก', 'ของน้ำ', 'เติมของ'], ['โซนน้ำซุป', 'กวาดถูครัว', 'ลวกของ'], ['จัดถาดเหล็ก', 'เครื่องปรุง', 'ทำซุป'], ['ล้างผัก', 'กวาดถู', 'เช็ดโต๊ะ'], null, ['คอยเสริม']],
@@ -1110,7 +1129,7 @@ function renderDutyImportModal() {
   }
   const candidates = staffActiveInMonth(state.staff.filter((entry) => entry.employmentType), state.dutyMonth);
   const rows = DUTY_SHEET_IMPORT_NAMES.map((sheetName, columnIndex) => {
-    const exact = candidates.find((person) => (person.name || '').trim() === sheetName);
+    const exact = matchStaffForSheetName(candidates, sheetName);
     // render() runs on every incoming snapshot, including ones caused by other
     // devices, and rebuilds this modal from scratch — so the picks are held in
     // state rather than left in the DOM, or filling in six dropdowns could be

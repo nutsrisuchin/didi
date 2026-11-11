@@ -654,8 +654,12 @@ Firebase Storage" note above; images live inline on the docs below as base64 dat
     the user asked to leave out; a `null` cell is a red (day-off) box. The `import-duty-sheet`
     flow (`open-duty-import` → `renderDutyImportModal()` → `confirm-duty-import`, Manager+) writes
     it into whichever month `state.dutyMonth` points at. **The column-to-staff mapping is picked by
-    hand in that modal**, one `<select>` per sheet column, defaulting to an exact name match and
-    offering "ไม่นำเข้า". The first version matched on exact name alone and in practice only one of
+    hand in that modal**, one `<select>` per sheet column, defaulting to
+    `matchStaffForSheetName()` and offering "ไม่นำเข้า". That matcher checks the sheet name plus
+    `DUTY_SHEET_NAME_ALIASES` (ปาย→ปลาย, พี่มาย→มาย, กิ๊ก→Kik, บิว→Bew, เลิฟ→Love — the app account
+    names the owner confirmed), case-insensitively so a Latin nickname saved as "kik" still hits.
+    The aliases only *pre-select* a dropdown, so one going stale costs an extra tap rather than
+    importing the wrong person's roster. The first version matched on exact name alone and in practice only one of
     the six columns matched — the shop's app accounts are spelled differently from the sheet. Do
     not replace the modal with fuzzier matching: a wrong guess writes a month of one person's
     duties onto another. The modal rejects the same person being picked for two columns, which
