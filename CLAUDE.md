@@ -161,13 +161,32 @@ the repo/title still say "Didi Malatang Hub" for clarity, but the **UI itself no
 changing permissions: `render()`'s nav gating, each `handleAction`/`handleForm` branch's own
 `roleAtLeast(...)` check, and `firestore.rules`.
 
-- **App Owner**: everything, including changing anyone's role; can't be removed via the UI
-  (`renderAdmin` never renders a delete button for the `App Owner` row, and the rule rejects
-  it server-side too).
+- **App Owner**: everything, including changing anyone's role, and — as of Nov 2026 — **editing
+  and archiving an `App Owner` row from the Admin tab**, which no role could do before. The row's
+  แก้ไข / ลาออก buttons are gated on `canManageRow` (`person.role !== 'App Owner' ||
+  roleAtLeast('App Owner')`) in `renderAdmin`, each of `edit-staff`/`save-staff-edit`/
+  `archive-staff`/`restore-staff` re-checks the same condition, and `firestore.rules` gained a
+  `roleAtLeast('App Owner')` clause on `staff` update/delete. Two guardrails make this safe to
+  have widened, and both must stay:
+  - **No archive button on your own row, any role** (`isSelf` in `renderAdmin`, plus an
+    `alert()` + abort in `archive-staff`). Archiving yourself signs you out the moment the staff
+    watcher echoes the write back through `refreshCurrentRole`, and for the last App Owner there
+    is then nobody left who can restore it. This also removed a pre-existing footgun where an
+    Admin could archive their own row.
+  - **`ensureStaffDoc` reactivates an archived bootstrap-owner doc** on login
+    (`user.email === DB.OWNER_EMAIL`). It previously only recreated that doc when it was
+    *missing*, so an archived one would resolve to "no access" and sign the owner out of a UI
+    nothing could restore them from. The console-created bootstrap owner therefore still can't be
+    locked out, which is the whole point of `isOwnerEmail()`.
+
+  Demoting your own App Owner account to a lower role is still allowed (an Admin can create a
+  fresh App Owner account from this same page, so it's recoverable) but prompts first, since the
+  owner-only controls disappear the instant it saves.
 - **Admin**: manage `staff` (any role except can't touch the App Owner — including **editing** an
   existing member's name/role/employmentType/dailyRate via the Admin page's "แก้ไข" button, which
-  opens `renderStaffEditModal()`; the App Owner row never gets this button, mirroring how it
-  never gets a delete button either), timesheet, warehouse, checklist, notifications, and the
+  opens `renderStaffEditModal()`; an `App Owner` row renders no แก้ไข / ลาออก button for an Admin
+  and `renderStaffEditModal` closes itself if a stale `state.editingStaffId` points at one — an
+  Admin must never be able to edit, and so demote, the account above them), timesheet, warehouse, checklist, notifications, and the
   `save-staff-edit` handler force-writes `dailyRate: null` whenever `employmentType` is empty
   (mirrors the create-time convention that only paid staff have a rate — see `staff` in the Data
   model section below), which means **typing a rate while leaving ประเภทการจ้างงาน at "ไม่มี" used

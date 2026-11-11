@@ -363,6 +363,17 @@ function hideLoginGate() {
 
 async function ensureStaffDoc(user) {
   let staffDoc = await DB.getOnce('staff', user.uid);
+  // The bootstrap owner is trusted unconditionally (firestore.rules'
+  // isOwnerEmail) precisely so the shop can never lock itself out — but that
+  // only held while their staff doc was missing. Now that an App Owner row can
+  // be archived from the Admin tab, an archived bootstrap-owner doc would make
+  // the role lookup below resolve to "no access" and sign them out of a UI
+  // nothing could restore them from. Reactivate instead.
+  if (staffDoc && user.email === DB.OWNER_EMAIL && !staffHasAppAccess(staffDoc)) {
+    const restored = { ...staffDoc, endDate: null, active: true };
+    await DB.put('staff', restored);
+    staffDoc = restored;
+  }
   if (!staffDoc && user.email === DB.OWNER_EMAIL) {
     await DB.put('staff', {
       id: user.uid,
@@ -772,7 +783,12 @@ function renderScheduleModal() {
 function renderStaffEditModal() {
   if (!state.editingStaffId) return '';
   const person = state.staff.find((entry) => entry.id === state.editingStaffId);
-  if (!person || person.role === 'App Owner') {
+  // An App Owner row is editable, but only by another App Owner — an Admin
+  // must never be able to edit (and so demote) the account above them. For an
+  // Admin the row renders no แก้ไข button at all, so landing here means a
+  // stale state.editingStaffId: close it rather than showing a form that
+  // save-staff-edit and firestore.rules would both reject anyway.
+  if (!person || (person.role === 'App Owner' && !roleAtLeast('App Owner'))) {
     state.editingStaffId = null;
     return '';
   }
@@ -1447,6 +1463,13 @@ function renderAdmin() {
   const rows = sortedStaff.map((person) => {
     const archived = !staffHasAppAccess(person);
     const endDate = employmentEnd(person);
+    // An App Owner row is managed only by an App Owner; every other row by
+    // any Admin+ who can reach this page at all. Mirrored by each action's own
+    // check in handleAction and by firestore.rules — all three are required.
+    const canManageRow = person.role !== 'App Owner' || roleAtLeast('App Owner');
+    // No archive button on your own row: archiving signs you out immediately
+    // (see the archive-staff handler), so it is only ever a mistake here.
+    const isSelf = person.id === state.currentUser?.uid;
     return `
     <div class="list-item${archived ? ' archived' : ''}">
       <div>
@@ -1454,12 +1477,14 @@ function renderAdmin() {
         <div class="muted">${roleLabel(person.role)}${person.employmentType ? ` · ${employmentTypeLabel(person.employmentType)} · ${formatCurrency(person.dailyRate)}/วัน` : ''}</div>
         ${endDate ? `<div class="small muted">ลาออกวันที่ ${formatDate(endDate)} · ข้อมูลเดือนก่อนหน้ายังแสดงอยู่</div>` : ''}
       </div>
-      ${person.role !== 'App Owner' ? `
+      ${canManageRow ? `
         <div class="row">
           <button class="btn secondary" data-action="edit-staff" data-id="${person.id}">แก้ไข</button>
           ${archived
             ? `<button class="btn secondary" data-action="restore-staff" data-id="${person.id}">ยกเลิกการลาออก</button>`
-            : `<button class="btn danger" data-action="archive-staff" data-id="${person.id}">ลาออก / ปิดการเข้าถึง</button>`}
+            : isSelf
+              ? ''
+              : `<button class="btn danger" data-action="archive-staff" data-id="${person.id}">ลาออก / ปิดการเข้าถึง</button>`}
         </div>
       ` : ''}
     </div>
@@ -2466,7 +2491,8 @@ async function handleAction(action, data) {
     // split as archiving itself, mirrored in firestore.rules.
     if (!roleAtLeast('Manager')) return;
     const person = state.staff.find((entry) => entry.id === data.id);
-    if (!person || person.role === 'App Owner') return;
+    if (!person) return;
+    if (person.role === 'App Owner' && !roleAtLeast('App Owner')) return;
     if (!roleAtLeast('Admin') && person.role !== 'Employee') return;
     if (!confirm(`ยกเลิกการลาออกของ "${person.name}" และเปิดให้เข้าใช้งานอีกครั้งใช่หรือไม่?`)) return;
     const restored = { ...person, endDate: null, active: true };
@@ -2491,8 +2517,19 @@ async function handleAction(action, data) {
     // the App Owner. firestore.rules enforces the same split server-side.
     if (!roleAtLeast('Manager')) return;
     const person = state.staff.find((entry) => entry.id === data.id);
-    if (!person || person.role === 'App Owner') return;
+    if (!person) return;
+    if (person.role === 'App Owner' && !roleAtLeast('App Owner')) return;
     if (!roleAtLeast('Admin') && person.role !== 'Employee') return;
+    // Archiving your own account signs you out through refreshCurrentRole the
+    // instant the staff watcher echoes the write back, and for an App Owner
+    // that is the one archive nobody left can undo from the UI. The bootstrap
+    // owner specifically is rescued by ensureStaffDoc on next login, but any
+    // other App Owner account would need the Firebase console to recover, so
+    // block it here rather than relying on that.
+    if (person.id === state.currentUser?.uid) {
+      alert('ไม่สามารถบันทึกการลาออกของบัญชีที่กำลังใช้งานอยู่ได้ — ให้บัญชีเจ้าของร้านอื่นดำเนินการแทน');
+      return;
+    }
     const today = todayISO();
     if (!confirm(`บันทึกการลาออกของ "${person.name}" วันที่ ${formatDate(today)} ใช่หรือไม่?
 
@@ -2655,7 +2692,8 @@ async function handleAction(action, data) {
   if (action === 'edit-staff') {
     if (!roleAtLeast('Admin')) return;
     const person = state.staff.find((entry) => entry.id === data.id);
-    if (!person || person.role === 'App Owner') return;
+    if (!person) return;
+    if (person.role === 'App Owner' && !roleAtLeast('App Owner')) return;
     state.editingStaffId = data.id;
     render();
     return;
@@ -2670,7 +2708,8 @@ async function handleAction(action, data) {
   if (action === 'save-staff-edit') {
     if (!roleAtLeast('Admin')) return;
     const person = state.staff.find((entry) => entry.id === state.editingStaffId);
-    if (!person || person.role === 'App Owner') return;
+    if (!person) return;
+    if (person.role === 'App Owner' && !roleAtLeast('App Owner')) return;
     const name = document.querySelector('#staff-edit-name')?.value.trim();
     const role = document.querySelector('#staff-edit-role')?.value;
     const employmentType = document.querySelector('#staff-edit-employment-type')?.value || '';
@@ -2685,6 +2724,16 @@ async function handleAction(action, data) {
     if (!employmentType && Number(dailyRateInput) > 0) {
       alert('กรุณาเลือกประเภทการจ้างงาน (เต็มเวลา/พาร์ทไทม์) ก่อน ไม่เช่นนั้นค่าจ้างต่อวันจะไม่ถูกบันทึก');
       return;
+    }
+    // Demoting your own App Owner account takes effect immediately (the staff
+    // watcher calls refreshCurrentRole on the way back), so the Admin tab's
+    // owner-only controls — including the one that would undo this — vanish
+    // the moment it saves. Recoverable, since an Admin can still create a new
+    // App Owner account from this same page, but worth one prompt first.
+    if (person.id === state.currentUser?.uid && person.role === 'App Owner' && role !== 'App Owner') {
+      if (!confirm(`ลดสิทธิ์บัญชีของคุณเองจากเจ้าของร้านเป็น "${roleLabel(role)}" ใช่หรือไม่?
+
+คุณจะเสียสิทธิ์เจ้าของร้านทันทีและจะแก้ไขบัญชีเจ้าของร้านอื่นไม่ได้อีก`)) return;
     }
     const dailyRate = employmentType ? Math.max(0, Number(dailyRateInput ?? person.dailyRate ?? 0)) : null;
     const record = { ...person, name, role, employmentType, dailyRate };

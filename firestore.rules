@@ -73,11 +73,18 @@ service cloud.firestore {
       // Managers may only edit/remove Employee-role profiles, and can never
       // change dailyRate — salary is Admin+ only to view or edit (Financial
       // tab), even though Managers otherwise manage Employee profiles day to
-      // day. Admin/Owner can touch anyone except demoting/removing the App Owner.
+      // day. An Admin can touch anyone *except* an App Owner row — only
+      // another App Owner can edit or archive one (the Admin tab renders those
+      // buttons on an App Owner row for an App Owner viewer only; this is the
+      // server-side half of that). The bootstrap owner is covered either way
+      // by isOwnerEmail and can never be locked out: an archived bootstrap
+      // owner doc is reactivated by ensureStaffDoc on their next login.
       allow update: if isOwnerEmail()
+        || roleAtLeast('App Owner')
         || (roleAtLeast('Admin') && resource.data.role != 'App Owner')
         || (roleAtLeast('Manager') && resource.data.role == 'Employee' && request.resource.data.dailyRate == resource.data.dailyRate);
       allow delete: if isOwnerEmail()
+        || roleAtLeast('App Owner')
         || (roleAtLeast('Admin') && resource.data.role != 'App Owner')
         || (roleAtLeast('Manager') && resource.data.role == 'Employee');
     }
