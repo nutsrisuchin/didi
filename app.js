@@ -1058,6 +1058,7 @@ function renderDuties() {
           : 'ดูอย่างเดียว — ผู้จัดการขึ้นไปเป็นผู้กำหนดหน้าที่'}</p>
         ${canManage ? `
           <div class="row" style="margin-top:0.6rem">
+            <button class="btn secondary" data-action="copy-duties-previous-month">ดึงจากเดือนก่อน (${formatMonthLabel(previousMonth(state.dutyMonth))})</button>
             <button class="btn secondary" data-action="open-duty-import">นำเข้าตารางหน้าที่จากเอกสารเดิม (30 วัน)</button>
           </div>
         ` : ''}
@@ -2864,6 +2865,107 @@ async function handleAction(action, data) {
     await DB.put('staff', archived);
     upsertLocal('staff', archived);
     pushNotification('บันทึกการลาออก', `${state.currentStaff?.name || 'ผู้ใช้'} บันทึกการลาออกของ ${person.name} วันที่ ${formatDate(today)}`);
+    render();
+    return;
+  }
+
+  if (action === 'copy-duties-previous-month') {
+    // Seeds the month on screen from the one before it, so a new month starts
+    // from last month's roster instead of 30 blank days. The previous month
+    // isn't in state.duties (the watcher only ever holds the month being
+    // viewed), so it's fetched once here rather than watched.
+    if (!roleAtLeast('Manager')) return;
+    const target = state.dutyMonth;
+    const source = previousMonth(target);
+    let sourceDuties;
+    try {
+      sourceDuties = await DB.getDutiesForMonth(source);
+    } catch (error) {
+      console.error('copy-duties-previous-month read failed', error);
+      alert('อ่านข้อมูลเดือนก่อนไม่สำเร็จ: ' + (error.message || error));
+      return;
+    }
+    if (!sourceDuties.length) {
+      alert(`เดือน ${formatMonthLabel(source)} ยังไม่มีข้อมูลตารางหน้าที่ให้ดึง`);
+      return;
+    }
+
+    const targetDates = datesInMonth(target);
+    const records = [];
+    let skippedExisting = 0;
+    let skippedDayOff = 0;
+    let skippedNotEmployed = 0;
+    let skippedNoSuchDay = 0;
+    sourceDuties.forEach((entry) => {
+      const duties = Array.isArray(entry.duties) ? entry.duties : [];
+      if (!duties.length) return;
+      // Mapped by day *number*, 1→1, 2→2: the roster is a monthly sheet and
+      // that's how the paper one is read. A 31st copied into a 30-day month
+      // has nowhere to go and is dropped rather than folded onto the 30th.
+      const dayIndex = Number(entry.date.slice(8, 10)) - 1;
+      const dateStr = targetDates[dayIndex];
+      if (!dateStr) {
+        skippedNoSuchDay++;
+        return;
+      }
+      const person = state.staff.find((candidate) => candidate.id === entry.staffId);
+      if (!person) return;
+      // Already has duties this month — this is a starting point, not a
+      // reset, so work already done on the target month is never clobbered.
+      if (dutyListFor(person.id, dateStr).length) {
+        skippedExisting++;
+        return;
+      }
+      if (!isEmployedOn(person, dateStr)) {
+        skippedNotEmployed++;
+        return;
+      }
+      if (getAttendanceForDate(person.id, dateStr)?.dayOff === true) {
+        skippedDayOff++;
+        return;
+      }
+      records.push({
+        id: `${dateStr}_${person.id}`,
+        staffId: person.id,
+        date: dateStr,
+        duties,
+        updatedAt: nowISO(),
+        updatedBy: state.currentUser?.uid || ''
+      });
+    });
+
+    if (!records.length) {
+      alert(`ไม่มีช่องที่ดึงมาได้ (เดือน ${formatMonthLabel(target)} อาจมีข้อมูลอยู่แล้วทุกช่อง)`);
+      return;
+    }
+    if (!confirm(
+      `ดึงตารางหน้าที่จากเดือน ${formatMonthLabel(source)} มาเป็นตัวตั้งต้นของเดือน ${formatMonthLabel(target)}\n\n` +
+      `จะเพิ่ม ${records.length} ช่อง โดยจับคู่ตามวันที่ (วันที่ 1 → วันที่ 1)\n` +
+      (skippedExisting ? `ช่องที่มีหน้าที่อยู่แล้ว ${skippedExisting} ช่องจะไม่ถูกแตะต้อง\n` : '') +
+      `\nดำเนินการต่อหรือไม่?`
+    )) return;
+
+    try {
+      for (let index = 0; index < records.length; index += 20) {
+        const chunk = records.slice(index, index + 20);
+        await Promise.all(chunk.map((record) => DB.put('duties', record)));
+        chunk.forEach((record) => upsertLocal('duties', record));
+      }
+      await pushNotification(
+        'ดึงตารางหน้าที่จากเดือนก่อน',
+        `${state.currentStaff?.name || ''} ดึงตารางหน้าที่ของเดือน ${formatMonthLabel(source)} มาเป็นตัวตั้งต้นของเดือน ${formatMonthLabel(target)} (${records.length} ช่อง)`
+      );
+      alert(
+        `ดึงมาแล้ว ${records.length} ช่อง` +
+        (skippedExisting ? `\nข้าม ${skippedExisting} ช่องที่มีหน้าที่อยู่แล้ว` : '') +
+        (skippedDayOff ? `\nข้าม ${skippedDayOff} ช่องที่เป็นวันหยุด` : '') +
+        (skippedNotEmployed ? `\nข้าม ${skippedNotEmployed} ช่องที่อยู่นอกช่วงการจ้างงาน` : '') +
+        (skippedNoSuchDay ? `\nข้าม ${skippedNoSuchDay} ช่องที่ไม่มีวันนั้นในเดือนนี้` : '')
+      );
+    } catch (error) {
+      console.error('copy-duties-previous-month write failed', error);
+      alert('บันทึกไม่สำเร็จ: ' + (error.message || error));
+    }
     render();
     return;
   }

@@ -675,6 +675,16 @@ Firebase Storage" note above; images live inline on the docs below as base64 dat
     Days outside the employment window and days already marked off are skipped for the same
     reason the grid makes those cells inert. Writes go in batches of 20 (~150 docs otherwise means
     ~150 sequential awaits on a phone connection).
+  - **`copy-duties-previous-month`** (Manager+) seeds the month on screen from the one before it,
+    so a new month starts from last month's roster rather than 30 blank days. The previous month
+    is **not** in `state.duties` (the watcher only ever holds the month being viewed), so it is
+    fetched once via `DB.getDutiesForMonth(month)` — a plain `.get()`, not a second listener, same
+    reasoning as `getOlderNotifications`. Cells are mapped **by day number** (1→1, 2→2), not by
+    weekday: the roster is a monthly sheet and that is how the paper one is read. A 31st copied
+    into a shorter month is dropped rather than folded onto the last day. It **only fills empty
+    cells** — a day that already has duties is left alone, since this is a starting point and not
+    a reset — and skips day-offs and days outside the employment window like every other write
+    here. The alert afterwards breaks down each skip reason so a surprising count is explainable.
   - Saving with every box unticked **deletes** the doc rather than storing `duties: []`, same
     reasoning as `clear-schedule-cell` — an empty doc would sit in the collection being re-read
     every time that month's roster is opened.

@@ -171,6 +171,20 @@ const DB = {
       );
   },
 
+  // One-time (not live) read of one month of duties, for "copy last month
+  // as a starting point". Deliberately a .get() rather than a second
+  // onSnapshot, same reasoning as getOlderNotifications: the roster only ever
+  // watches the month on screen, and standing up a listener on a month nobody
+  // is looking at would undo the point of scoping the watcher at all.
+  async getDutiesForMonth(month) {
+    const snapshot = await firestore
+      .collection('duties')
+      .where('date', '>=', `${month}-01`)
+      .where('date', '<=', `${month}-31`)
+      .get();
+    return snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+  },
+
   async getOnce(collection, id) {
     const doc = await firestore.collection(collection).doc(id).get();
     return doc.exists ? { id: doc.id, ...doc.data() } : null;
