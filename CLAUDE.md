@@ -652,11 +652,20 @@ Firebase Storage" note above; images live inline on the docs below as base64 dat
     existing 30-day paper roster, transcribed from a photo of it — same idea as
     `STOCK_HISTORY_DATA` for warehouse logs. Columns are the sheet's own order **minus ตาล**, who
     the user asked to leave out; a `null` cell is a red (day-off) box. The `import-duty-sheet`
-    action (Manager+) writes it into whichever month `state.dutyMonth` points at, matching columns
-    to staff by **exact name** — anyone hired since, or spelled differently in the app, gets no
-    rows and stays blank, which was the explicit ask rather than a failure mode. The button is
-    rendered only while the viewed month has no duty docs at all, the same "guard on the data, not
-    on a flag" trick `import-stock-seed` uses. It **never touches `attendance`**: the sheet's red
+    flow (`open-duty-import` → `renderDutyImportModal()` → `confirm-duty-import`, Manager+) writes
+    it into whichever month `state.dutyMonth` points at. **The column-to-staff mapping is picked by
+    hand in that modal**, one `<select>` per sheet column, defaulting to an exact name match and
+    offering "ไม่นำเข้า". The first version matched on exact name alone and in practice only one of
+    the six columns matched — the shop's app accounts are spelled differently from the sheet. Do
+    not replace the modal with fuzzier matching: a wrong guess writes a month of one person's
+    duties onto another. The modal rejects the same person being picked for two columns, which
+    would otherwise race two sets of duties for one `(person, day)` doc. Picks live in
+    `state.dutyImportMapping` rather than in the DOM, since `render()` fires on any incoming
+    snapshot and would otherwise wipe a half-filled form; the `onchange` wiring for this is the
+    only per-control wiring in `bindView()` besides the modal backdrop, and it deliberately does
+    not call `render()`. Unlike `import-stock-seed`, the button stays available after a run — the
+    first import can legitimately need redoing once the mapping is right, and the modal states
+    that existing cells get overwritten. It **never touches `attendance`**: the sheet's red
     cells are skipped rather than marked as days off, since writing those would change that
     person's pay — if the day-offs are wanted too, that is a separate decision to confirm.
     Days outside the employment window and days already marked off are skipped for the same

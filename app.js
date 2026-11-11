@@ -25,6 +25,8 @@ const state = {
   duties: [],
   dutyMonth: monthISO(),
   selectedDutyCell: null,
+  showDutyImportModal: false,
+  dutyImportMapping: {},
   selectedScheduleCell: null,
   editingStaffId: null,
   showChangePinModal: false
@@ -660,7 +662,7 @@ function render() {
   } else if (state.view === 'financial') {
     content.innerHTML = renderFinancial();
   }
-  document.querySelector('#modal-host').innerHTML = renderScheduleModal() + renderDutyModal() + renderStaffEditModal() + renderChangePinModal();
+  document.querySelector('#modal-host').innerHTML = renderScheduleModal() + renderDutyModal() + renderDutyImportModal() + renderStaffEditModal() + renderChangePinModal();
   bindView();
   document.querySelectorAll('.nav-btn').forEach((button) => {
     const roleMin = button.dataset.roleMin;
@@ -1035,9 +1037,9 @@ function renderDuties() {
         <p class="muted small" style="margin-top:0.5rem">${canManage
           ? 'แตะช่องของพนักงานเพื่อเลือกหน้าที่ เลือกได้มากกว่า 1 อย่างต่อวัน · ช่อง "หยุด" มาจากแท็บลงเวลา ต้องแก้ที่นั่น'
           : 'ดูอย่างเดียว — ผู้จัดการขึ้นไปเป็นผู้กำหนดหน้าที่'}</p>
-        ${canManage && !state.duties.length ? `
+        ${canManage ? `
           <div class="row" style="margin-top:0.6rem">
-            <button class="btn secondary" data-action="import-duty-sheet">นำเข้าตารางหน้าที่จากเอกสารเดิม (30 วัน)</button>
+            <button class="btn secondary" data-action="open-duty-import">นำเข้าตารางหน้าที่จากเอกสารเดิม (30 วัน)</button>
           </div>
         ` : ''}
         ${staffList.length
@@ -1087,6 +1089,57 @@ function renderDutyModal() {
           <button class="btn" data-action="save-duty-cell">บันทึก</button>
           ${current.length ? `<button class="btn secondary" data-action="clear-duty-cell">ล้างหน้าที่วันนี้</button>` : ''}
           <button class="btn secondary" data-action="close-duty-cell">ปิด</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+// Column-to-staff mapping for the one-time sheet import. The first version
+// matched on the staff member's name being spelled exactly as the sheet spells
+// it, and in practice only one of the six columns matched — the shop's app
+// accounts use different spellings (nicknames with/without พี่, and so on).
+// Guessing harder would be worse, not better: a wrong guess writes a month of
+// someone else's duties onto a real person. So the mapping is picked by hand
+// here instead, once, and the sheet's own name is only ever a default.
+function renderDutyImportModal() {
+  if (!state.showDutyImportModal) return '';
+  if (!roleAtLeast('Manager')) {
+    state.showDutyImportModal = false;
+    return '';
+  }
+  const candidates = staffActiveInMonth(state.staff.filter((entry) => entry.employmentType), state.dutyMonth);
+  const rows = DUTY_SHEET_IMPORT_NAMES.map((sheetName, columnIndex) => {
+    const exact = candidates.find((person) => (person.name || '').trim() === sheetName);
+    // render() runs on every incoming snapshot, including ones caused by other
+    // devices, and rebuilds this modal from scratch — so the picks are held in
+    // state rather than left in the DOM, or filling in six dropdowns could be
+    // wiped halfway by a notification arriving from someone else's phone.
+    const chosen = state.dutyImportMapping[columnIndex] ?? (exact ? exact.id : '');
+    const dayCount = DUTY_SHEET_IMPORT_ROWS.filter((row) => row[columnIndex]).length;
+    const options = candidates.map((person) => `
+      <option value="${person.id}" ${chosen === person.id ? 'selected' : ''}>${person.name}</option>
+    `).join('');
+    return `
+      <label class="duty-import-row">
+        <span class="duty-import-name">${sheetName}<span class="muted small"> · ${dayCount} วัน</span></span>
+        <select data-duty-import-column="${columnIndex}">
+          <option value="" ${chosen ? '' : 'selected'}>— ไม่นำเข้า —</option>
+          ${options}
+        </select>
+      </label>
+    `;
+  }).join('');
+  return `
+    <div class="modal-backdrop" data-close-action="close-duty-import">
+      <div class="modal-card">
+        <h3 style="margin:0 0 0.5rem">นำเข้าตารางหน้าที่ · ${formatMonthLabel(state.dutyMonth)}</h3>
+        <p class="muted small" style="margin:0 0 0.6rem">เลือกว่าแต่ละคอลัมน์ในเอกสารตรงกับพนักงานคนไหนในแอป คอลัมน์ที่ไม่ต้องการให้เว้นเป็น "ไม่นำเข้า"</p>
+        <div class="stack">${rows}</div>
+        <p class="muted small" style="margin:0.7rem 0 0">ช่องสีแดง (วันหยุด) ในเอกสารจะถูกข้าม และจะไม่แก้ข้อมูลการลงเวลาหรือเงินเดือนใดๆ · ช่องที่มีหน้าที่อยู่แล้วในเดือนนี้จะถูกเขียนทับ</p>
+        <div class="row" style="margin-top:0.8rem">
+          <button class="btn" data-action="confirm-duty-import">นำเข้า</button>
+          <button class="btn secondary" data-action="close-duty-import">ยกเลิก</button>
         </div>
       </div>
     </div>
@@ -2067,6 +2120,15 @@ function bindView() {
       handleForm(form.dataset.form, new FormData(form));
     };
   });
+  // The duty-import dropdowns are the one control here that has to survive a
+  // re-render, so each change is mirrored into state. No render() call — the
+  // DOM is already correct, and re-rendering mid-selection is the exact thing
+  // this is guarding against.
+  document.querySelectorAll('[data-duty-import-column]').forEach((select) => {
+    select.onchange = () => {
+      state.dutyImportMapping[select.dataset.dutyImportColumn] = select.value;
+    };
+  });
   // Clicking the darkened backdrop itself (not the modal card, which is a
   // child and would otherwise bubble up to this same click) closes the modal.
   document.querySelectorAll('.modal-backdrop').forEach((backdrop) => {
@@ -2787,21 +2849,43 @@ async function handleAction(action, data) {
     return;
   }
 
-  if (action === 'import-duty-sheet') {
+  if (action === 'open-duty-import') {
+    if (!roleAtLeast('Manager')) return;
+    // Start from the name-match defaults again rather than whatever was
+    // picked last time, which may have been for a different month.
+    state.dutyImportMapping = {};
+    state.showDutyImportModal = true;
+    render();
+    return;
+  }
+
+  if (action === 'close-duty-import') {
+    state.showDutyImportModal = false;
+    render();
+    return;
+  }
+
+  if (action === 'confirm-duty-import') {
     // One-time backfill of the shop's paper roster into whichever month is on
-    // screen. Same "guard on the data, not on a flag" trick import-stock-seed
-    // uses: the button is only rendered while this month has no duty docs at
-    // all, so there's no separate "already imported" document to maintain.
+    // screen, using the column-to-staff mapping chosen in the modal above.
     if (!roleAtLeast('Manager')) return;
     const month = state.dutyMonth;
     const dates = datesInMonth(month);
-    const columns = DUTY_SHEET_IMPORT_NAMES.map((sheetName) => ({
-      sheetName,
-      person: state.staff.find((entry) => (entry.name || '').trim() === sheetName) || null
-    }));
-    const missing = columns.filter((column) => !column.person).map((column) => column.sheetName);
+    const columns = DUTY_SHEET_IMPORT_NAMES.map((sheetName, columnIndex) => {
+      const select = document.querySelector(`[data-duty-import-column="${columnIndex}"]`);
+      const staffId = select?.value || '';
+      return { sheetName, person: staffId ? state.staff.find((entry) => entry.id === staffId) : null };
+    });
     if (columns.every((column) => !column.person)) {
-      alert(`ไม่พบชื่อพนักงานในแอปที่ตรงกับเอกสารเลย (${DUTY_SHEET_IMPORT_NAMES.join(', ')}) — ตรวจสอบการสะกดชื่อในหน้าแอดมินก่อน`);
+      alert('ยังไม่ได้เลือกพนักงานสำหรับคอลัมน์ใดเลย');
+      return;
+    }
+    // One person picked for two columns would mean two different sets of
+    // duties racing for the same (person, day) doc, with whichever column is
+    // written last silently winning. Reject rather than quietly pick one.
+    const chosenIds = columns.filter((column) => column.person).map((column) => column.person.id);
+    if (new Set(chosenIds).size !== chosenIds.length) {
+      alert('เลือกพนักงานคนเดียวกันซ้ำมากกว่าหนึ่งคอลัมน์ กรุณาเลือกใหม่ให้ไม่ซ้ำกัน');
       return;
     }
 
@@ -2845,14 +2929,11 @@ async function handleAction(action, data) {
       alert('ไม่มีข้อมูลที่นำเข้าได้สำหรับเดือนนี้');
       return;
     }
-    const confirmed = confirm(
-      `นำเข้าตารางหน้าที่ ${records.length} ช่อง ลงเดือน ${formatMonthLabel(month)}\n\n` +
-      `พนักงานที่จับคู่ได้: ${columns.filter((column) => column.person).map((column) => column.sheetName).join(', ')}\n` +
-      (missing.length ? `ไม่พบชื่อในแอป (จะเว้นว่างไว้): ${missing.join(', ')}\n` : '') +
-      `\nช่องสีแดง (วันหยุด) ในเอกสารจะถูกข้าม และจะไม่แก้ข้อมูลการลงเวลา/เงินเดือนใดๆ ทั้งสิ้น\n` +
-      `ช่องที่มีหน้าที่อยู่แล้วในเดือนนี้จะถูกเขียนทับ ดำเนินการต่อหรือไม่?`
-    );
-    if (!confirmed) return;
+    const pairs = columns
+      .filter((column) => column.person)
+      .map((column) => `${column.sheetName} → ${column.person.name}`)
+      .join('\n');
+    if (!confirm(`นำเข้า ${records.length} ช่อง ลงเดือน ${formatMonthLabel(month)}\n\n${pairs}\n\nดำเนินการต่อหรือไม่?`)) return;
 
     try {
       // Written in small batches rather than one await per doc: ~150 writes
@@ -2862,6 +2943,7 @@ async function handleAction(action, data) {
         await Promise.all(chunk.map((record) => DB.put('duties', record)));
         chunk.forEach((record) => upsertLocal('duties', record));
       }
+      state.showDutyImportModal = false;
       await pushNotification(
         'นำเข้าตารางหน้าที่',
         `${state.currentStaff?.name || ''} นำเข้าตารางหน้าที่จากเอกสารเดิม ${records.length} ช่อง ลงเดือน ${formatMonthLabel(month)}`
@@ -2872,7 +2954,7 @@ async function handleAction(action, data) {
         (skippedNotEmployed ? `\nข้าม ${skippedNotEmployed} ช่องที่อยู่นอกช่วงการจ้างงาน` : '')
       );
     } catch (error) {
-      console.error('import-duty-sheet failed', error);
+      console.error('confirm-duty-import failed', error);
       alert('นำเข้าไม่สำเร็จ: ' + (error.message || error));
     }
     render();
