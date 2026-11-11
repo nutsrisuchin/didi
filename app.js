@@ -822,6 +822,11 @@ function renderStaffEditModal() {
             ค่าจ้างต่อวัน (฿, เฉพาะพนักงาน)
             <input id="staff-edit-daily-rate" type="number" min="0" step="0.01" value="${person.dailyRate ?? 0}" />
           </label>
+          <label>
+            วันเริ่มงาน
+            <input id="staff-edit-start-date" type="date" value="${employmentStart(person)}" />
+          </label>
+          <p class="muted small" style="margin:0">การแก้วันเริ่มงานมีผลย้อนหลัง — วันก่อนวันเริ่มงานจะไม่นับเป็นวันทำงานในตารางเวลาและเงินเดือนที่คาดการณ์${employmentEnd(person) ? ` (วันลาออกปัจจุบัน: ${formatDate(employmentEnd(person))} แก้ได้จากตารางเวลาประจำเดือน)` : ''}</p>
         </div>
         <div class="row" style="margin-top:0.8rem">
           <button class="btn" data-action="save-staff-edit">บันทึก</button>
@@ -1508,7 +1513,7 @@ function renderAdmin() {
                 <option value="App Owner">เจ้าของร้าน</option>
                 <option value="Admin">แอดมิน</option>
                 <option value="Manager">ผู้จัดการ</option>
-                <option value="Employee">พนักงาน</option>
+                <option value="Employee" selected>พนักงาน</option>
               </select>
             </label>
             <label>
@@ -2714,7 +2719,25 @@ async function handleAction(action, data) {
     const role = document.querySelector('#staff-edit-role')?.value;
     const employmentType = document.querySelector('#staff-edit-employment-type')?.value || '';
     const dailyRateInput = document.querySelector('#staff-edit-daily-rate')?.value;
+    const startDate = (document.querySelector('#staff-edit-start-date')?.value || '').trim();
     if (!name || !role) return;
+    // Same field the schedule-cell modal's เริ่มงาน input writes, editable here
+    // too because that modal only ever lists staff with an employmentType —
+    // an Owner/Admin account (employmentType '') never appears in the grid, so
+    // the Admin tab was the only place their start date could be reached.
+    if (!startDate) {
+      alert('กรุณาระบุวันเริ่มงาน');
+      return;
+    }
+    // Both bounds are inclusive, so start == end is a valid one-day window;
+    // only a start strictly after the end date is nonsense. Left unchecked it
+    // would make isEmployedOn false for every day of the window, quietly
+    // dropping the person from every month's grid and payroll.
+    const existingEnd = employmentEnd(person);
+    if (existingEnd && startDate > existingEnd) {
+      alert(`วันเริ่มงานต้องไม่อยู่หลังวันลาออก (${formatDate(existingEnd)})`);
+      return;
+    }
     // dailyRate is only meaningful when employmentType is set (see CLAUDE.md — Owner/Admin
     // accounts intentionally have employmentType:'' and dailyRate:null). Without this check,
     // typing a rate while leaving ประเภทการจ้างงาน at "ไม่มี" silently discarded it as null —
@@ -2736,7 +2759,7 @@ async function handleAction(action, data) {
 คุณจะเสียสิทธิ์เจ้าของร้านทันทีและจะแก้ไขบัญชีเจ้าของร้านอื่นไม่ได้อีก`)) return;
     }
     const dailyRate = employmentType ? Math.max(0, Number(dailyRateInput ?? person.dailyRate ?? 0)) : null;
-    const record = { ...person, name, role, employmentType, dailyRate };
+    const record = { ...person, name, role, employmentType, dailyRate, startDate };
     await DB.put('staff', record);
     upsertLocal('staff', record);
     state.editingStaffId = null;

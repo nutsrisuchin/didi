@@ -183,7 +183,7 @@ changing permissions: `render()`'s nav gating, each `handleAction`/`handleForm` 
   fresh App Owner account from this same page, so it's recoverable) but prompts first, since the
   owner-only controls disappear the instant it saves.
 - **Admin**: manage `staff` (any role except can't touch the App Owner — including **editing** an
-  existing member's name/role/employmentType/dailyRate via the Admin page's "แก้ไข" button, which
+  existing member's name/role/employmentType/dailyRate/startDate via the Admin page's "แก้ไข" button, which
   opens `renderStaffEditModal()`; an `App Owner` row renders no แก้ไข / ลาออก button for an Admin
   and `renderStaffEditModal` closes itself if a stale `state.editingStaffId` points at one — an
   Admin must never be able to edit, and so demote, the account above them), timesheet, warehouse, checklist, notifications, and the
@@ -194,7 +194,10 @@ changing permissions: `render()`'s nav gating, each `handleAction`/`handleForm` 
   employment type set (e.g. created via this same page's "Add account" form, which also defaults
   that dropdown to "ไม่มี", so an Employee-role account can end up with no employmentType at
   creation). Now guarded: entering a nonzero rate with employmentType still empty shows an alert
-  and aborts the save instead of writing `null`. If a staff row on the Admin page is missing its
+  and aborts the save instead of writing `null`. That form's ตำแหน่ง dropdown carries an explicit
+  `selected` on the `Employee` option — the options are listed highest-role-first, so without it
+  the browser defaulted a new account to `App Owner`, the most privileged role, for the least
+  common case. Keep the `selected` if the option order changes. If a staff row on the Admin page is missing its
   "· เต็มเวลา/พาร์ทไทม์ · ฿.../วัน" line entirely, that's the tell — its `employmentType` is `''`,
   fix it by setting employment type and rate together in the same edit, not just the rate alone.
   **Financial section** (`/financial` view, `data-role-min="Admin"` on its nav button plus an
@@ -270,7 +273,15 @@ changing permissions: `render()`'s nav gating, each `handleAction`/`handleForm` 
 - **Employment window: `staff.startDate` / `staff.endDate`** (both `YYYY-MM-DD`; `endDate` is
   `null` while employed). Set from the schedule-cell modal's เริ่มงาน / ลาออก date inputs
   (`save-employment-dates`, Manager+ — same role split as archiving: a Manager may only touch
-  Employee-role profiles). `employmentStart()` falls back to `createdAt` for records predating
+  Employee-role profiles). `startDate` is **also editable from the Admin tab's แก้ไข modal**
+  (`save-staff-edit`, Admin+), which is the only place it can be reached for an Owner/Admin
+  account at all: the schedule-cell modal is driven by the monthly grid, and the grid only ever
+  lists staff with an `employmentType`, so an account with `employmentType: ''` never appears in
+  it. That handler rejects an empty date and rejects a `startDate` strictly after an existing
+  `endDate` — since both bounds are inclusive, `start == end` is a legitimate one-day window, but
+  a start *after* the end makes `isEmployedOn` false for every day and would silently drop the
+  person from every month's grid and payroll. `endDate` is deliberately *not* in that modal;
+  it stays on the archive button and the schedule grid. `employmentStart()` falls back to `createdAt` for records predating
   these fields, so don't read `startDate` directly; `isEmployedOn(employee, date)` is the single
   predicate every caller uses. **Both bounds are inclusive** — someone starting on the 15th is
   employed on the 15th, someone resigning on the 20th is employed through the 20th.
