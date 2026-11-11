@@ -644,6 +644,13 @@ Firebase Storage" note above; images live inline on the docs below as base64 dat
     drop it. These are the one case of Thai strings stored as Firestore *values* rather than
     English-plus-a-label-map (contrast `staff.role` / `employmentType`) — nothing compares against
     them in logic, they're only ever displayed, so there's no English value to keep.
+  - **Staff who have left are hidden from the roster entirely**, in every month —
+    `renderDuties()` filters by `isCurrentlyEmployed` on top of `staffActiveInMonth`, and the
+    import modal uses the same list. This is a deliberate split from the Timesheet grid, which
+    keeps a resigned person visible in the months they worked because it is a payroll record; the
+    roster is a planning tool, where a column of gray cells for someone who no longer turns up is
+    only noise. Nothing is deleted — restoring the person (ยกเลิกการลาออก) brings their columns and
+    their existing duty docs straight back.
   - **No duty doc stores "day off" or "not employed"** — those two cell states are read live from
     `attendance` (`dayOff`) and the employment window (`isEmployedOn`), exactly as the schedule
     grid does, so the two grids can't disagree about who is even working. A day-off cell is inert

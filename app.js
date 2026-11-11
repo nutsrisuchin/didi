@@ -1007,7 +1007,15 @@ function renderChangePinModal() {
 // duty docs themselves store nothing about either.
 function renderDuties() {
   const canManage = roleAtLeast('Manager');
-  const staffList = staffActiveInMonth(state.staff.filter((entry) => entry.employmentType), state.dutyMonth);
+  // Unlike the Timesheet grid, the roster hides anyone who has already left.
+  // That grid is a payroll record and has to keep showing a resigned person in
+  // the months they worked; this one is a planning tool, and a column of gray
+  // cells for someone who no longer turns up is just noise. Their duty docs are
+  // untouched — only hidden — so restoring the person brings the columns back.
+  const staffList = staffActiveInMonth(
+    state.staff.filter((entry) => entry.employmentType && isCurrentlyEmployed(entry)),
+    state.dutyMonth
+  );
   const dates = datesInMonth(state.dutyMonth);
   const headerCells = staffList.map((employee) => `<th>${employee.name}</th>`).join('');
 
@@ -1128,7 +1136,12 @@ function renderDutyImportModal() {
     state.showDutyImportModal = false;
     return '';
   }
-  const candidates = staffActiveInMonth(state.staff.filter((entry) => entry.employmentType), state.dutyMonth);
+  // Same filter as the grid behind it — offering a column mapping to someone
+  // who has left would write rows that the roster then refuses to display.
+  const candidates = staffActiveInMonth(
+    state.staff.filter((entry) => entry.employmentType && isCurrentlyEmployed(entry)),
+    state.dutyMonth
+  );
   const rows = DUTY_SHEET_IMPORT_NAMES.map((sheetName, columnIndex) => {
     const exact = matchStaffForSheetName(candidates, sheetName);
     // render() runs on every incoming snapshot, including ones caused by other
