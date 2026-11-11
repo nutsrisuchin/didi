@@ -160,6 +160,30 @@ textarea { min-height: 5rem; resize: vertical; }
   border-radius: 6px;
 }
 .schedule-cell.off { background: var(--color-overdue-bg); color: var(--color-muted); }
+/* Duty roster cells hold a comma-separated list of jobs, not a short time
+   range, so they wrap instead of inheriting .schedule-table's nowrap — with a
+   min-width so a one-word duty doesn't collapse the column to nothing and a
+   max so a long list doesn't push the whole grid off a phone screen. */
+.duty-table td, .duty-table th { white-space: normal; }
+.duty-table td:not(:first-child) { min-width: 108px; max-width: 160px; }
+.duty-cell { text-align: left; line-height: 1.35; }
+.duty-cell.duty-empty { color: var(--color-muted); }
+.duty-option-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.2rem; }
+/* ~44px tall so each row is a real touch target on a phone, per the mobile
+   rules in CLAUDE.md — the checkbox glyph alone is far smaller than that. */
+.duty-option {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 44px;
+  padding: 0 0.4rem;
+  border-radius: 8px;
+  font-size: 0.9rem;
+}
+.duty-option input { width: 20px; height: 20px; flex: none; }
+@media (max-width: 650px) {
+  .duty-option-list { grid-template-columns: 1fr; }
+}
 .schedule-cell.late { color: var(--color-danger); font-weight: 700; }
 .schedule-cell.selected { outline: 2px solid var(--color-gold); outline-offset: -2px; }
 span.schedule-cell { cursor: default; }

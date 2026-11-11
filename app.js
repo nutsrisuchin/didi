@@ -22,12 +22,44 @@ const state = {
   moreNotificationsAvailable: true,
   financialMonth: monthISO(),
   timesheetMonth: monthISO(),
+  duties: [],
+  dutyMonth: monthISO(),
+  selectedDutyCell: null,
   selectedScheduleCell: null,
   editingStaffId: null,
   showChangePinModal: false
 };
 
 const THAI_WEEKDAY_SHORT = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'];
+
+// The duty roster's fixed option list, transcribed from the shop's existing
+// paper/sheet ตารางหน้าที่. Free text is deliberately not offered: the whole
+// point of a fixed list is that the same job is spelled the same way in every
+// cell, so a future grouping/count by duty stays possible. Editing this array
+// is the only way to add one — an old duty removed from here still displays
+// fine wherever it was already saved (cells render whatever strings the doc
+// holds), it just can't be ticked on a new day.
+const DUTY_OPTIONS = [
+  'เข้าบ่าย',
+  'ทำซุป',
+  'โซนน้ำซุป',
+  'เครื่องปรุง',
+  'ล้างผัก',
+  'จัดผัก',
+  'ของน้ำ',
+  'เติมของ',
+  'ลวกของ',
+  'ผัดแห้ง',
+  'ทอด',
+  'รีดน้ำ',
+  'จัดถาดเหล็ก',
+  'ขึ้นถาดเหล็ก',
+  'กวาดถู',
+  'กวาดถูครัว',
+  'เช็ดโต๊ะ',
+  'ยืนเครื่อง',
+  'คอยเสริม'
+];
 const THAI_MONTH_FULL = [
   'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
   'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'
@@ -292,6 +324,19 @@ function getAttendanceForDate(staffId, date) {
   return state.attendance.find((entry) => entry.id === attendanceId(staffId, date)) || null;
 }
 
+// Same deterministic key as attendance (`${date}_${staffId}`), so assigning
+// duties twice for one person/day upserts instead of duplicating. state.duties
+// only ever holds the month the roster is showing — see DB.watchDutiesForMonth
+// — so this returns undefined for any other month even if a doc exists.
+function getDutyForDate(staffId, dateStr) {
+  return state.duties.find((entry) => entry.staffId === staffId && entry.date === dateStr);
+}
+
+function dutyListFor(staffId, dateStr) {
+  const record = getDutyForDate(staffId, dateStr);
+  return Array.isArray(record?.duties) ? record.duties : [];
+}
+
 // Two ways a checklist's due-ness is computed: a plain "every N days" interval
 // (the original model), or specific weekdays (routine.weekdays, an array of
 // Date.getDay() values 0-6) — due starting midnight on a selected weekday
@@ -461,6 +506,24 @@ function startWatchers() {
     state.warehouseLogs = records;
     render();
   });
+  watchDutiesForCurrentMonth();
+}
+
+// Unlike every other watcher here this one is torn down and recreated when the
+// roster's month picker moves, since DB.watchDutiesForMonth subscribes to one
+// month at a time (see the read-cost note there). Dropping the old listener
+// first is what keeps them from stacking up as someone pages through months.
+let dutiesUnsubscribe = null;
+function watchDutiesForCurrentMonth() {
+  if (dutiesUnsubscribe) dutiesUnsubscribe();
+  // Clear immediately rather than leaving the previous month's rows on screen
+  // until the first snapshot lands — they'd be drawn against the new month's
+  // dates, showing duties on days they were never assigned to.
+  state.duties = [];
+  dutiesUnsubscribe = DB.watchDutiesForMonth(state.dutyMonth, (records) => {
+    state.duties = records;
+    render();
+  });
 }
 
 function initAuthGate() {
@@ -538,6 +601,8 @@ function render() {
     content.innerHTML = renderHome();
   } else if (state.view === 'timesheet') {
     content.innerHTML = renderTimesheet();
+  } else if (state.view === 'duties') {
+    content.innerHTML = renderDuties();
   } else if (state.view === 'warehouse') {
     content.innerHTML = renderWarehouse();
   } else if (state.view === 'warehouse-analytics') {
@@ -551,7 +616,7 @@ function render() {
   } else if (state.view === 'financial') {
     content.innerHTML = renderFinancial();
   }
-  document.querySelector('#modal-host').innerHTML = renderScheduleModal() + renderStaffEditModal() + renderChangePinModal();
+  document.querySelector('#modal-host').innerHTML = renderScheduleModal() + renderDutyModal() + renderStaffEditModal() + renderChangePinModal();
   bindView();
   document.querySelectorAll('.nav-btn').forEach((button) => {
     const roleMin = button.dataset.roleMin;
@@ -864,6 +929,115 @@ function renderChangePinModal() {
         <div class="row" style="margin-top:0.8rem">
           <button class="btn" data-action="submit-change-pin">บันทึก</button>
           <button class="btn secondary" data-action="close-change-pin">ปิด</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+// The duty roster: same shape as the monthly schedule grid (one row per day,
+// one column per paid staff member) but showing who does what rather than
+// clock times. It reads attendance for the วันหยุด / employment-window states
+// so the two grids can't disagree about who is even working that day — the
+// duty docs themselves store nothing about either.
+function renderDuties() {
+  const canManage = roleAtLeast('Manager');
+  const staffList = staffActiveInMonth(state.staff.filter((entry) => entry.employmentType), state.dutyMonth);
+  const dates = datesInMonth(state.dutyMonth);
+  const headerCells = staffList.map((employee) => `<th>${employee.name}</th>`).join('');
+
+  const bodyRows = dates.map((dateStr) => {
+    const dayOfWeek = THAI_WEEKDAY_SHORT[new Date(dateStr).getDay()];
+    const dayNum = Number(dateStr.slice(8, 10));
+    const cells = staffList.map((employee) => {
+      if (!isEmployedOn(employee, dateStr)) {
+        return '<td><span class="schedule-cell outside" aria-label="ไม่ได้อยู่ในช่วงการจ้างงาน">—</span></td>';
+      }
+      // A day off is the red cell on the shop's own sheet. Duties aren't
+      // assignable on one, and the cell stays inert even for a Manager —
+      // mark the person as working from the ลงเวลา tab first.
+      if (getAttendanceForDate(employee.id, dateStr)?.dayOff === true) {
+        return '<td><span class="schedule-cell off">หยุด</span></td>';
+      }
+      const duties = dutyListFor(employee.id, dateStr);
+      const selected = state.selectedDutyCell
+        && state.selectedDutyCell.staffId === employee.id
+        && state.selectedDutyCell.date === dateStr;
+      const classes = ['schedule-cell', 'duty-cell'];
+      if (!duties.length) classes.push('duty-empty');
+      if (selected) classes.push('selected');
+      const label = duties.length ? duties.join(', ') : 'ยังไม่กำหนด';
+      return canManage
+        ? `<td><button type="button" class="${classes.join(' ')}" data-action="select-duty-cell" data-staff-id="${employee.id}" data-date="${dateStr}">${label}</button></td>`
+        : `<td><span class="${classes.join(' ')}">${label}</span></td>`;
+    }).join('');
+    return `<tr><td class="schedule-daylabel">${dayOfWeek} ${dayNum}</td>${cells}</tr>`;
+  }).join('');
+
+  return `
+    <div class="grid">
+      <section class="card">
+        <div class="row" style="justify-content:space-between">
+          <h2 style="margin:0">ตารางหน้าที่</h2>
+          <span class="badge">${formatMonthLabel(state.dutyMonth)}</span>
+        </div>
+        <form data-form="duty-month-form" class="row" style="margin-top:0.8rem">
+          <label style="min-width:220px">
+            เดือน
+            <input type="month" name="month" value="${state.dutyMonth}" />
+          </label>
+          <button class="btn" type="submit">ดู</button>
+        </form>
+        <p class="muted small" style="margin-top:0.5rem">${canManage
+          ? 'แตะช่องของพนักงานเพื่อเลือกหน้าที่ เลือกได้มากกว่า 1 อย่างต่อวัน · ช่อง "หยุด" มาจากแท็บลงเวลา ต้องแก้ที่นั่น'
+          : 'ดูอย่างเดียว — ผู้จัดการขึ้นไปเป็นผู้กำหนดหน้าที่'}</p>
+        ${staffList.length
+          ? `<div style="overflow-x:auto; margin-top:0.8rem;">
+              <table class="schedule-table duty-table">
+                <thead><tr><th>วัน</th>${headerCells}</tr></thead>
+                <tbody>${bodyRows}</tbody>
+              </table>
+            </div>`
+          : '<p class="muted" style="margin-top:0.8rem">ยังไม่มีพนักงานที่ทำงานในเดือนนี้</p>'}
+      </section>
+    </div>
+  `;
+}
+
+// Multi-select duty picker for one (staff, date) cell. Checkboxes rather than
+// a <select multiple>, which is close to unusable on a phone. Like every other
+// modal here it has no render loop of its own — render() rebuilds it from
+// state.selectedDutyCell on each cycle, so a snapshot arriving mid-edit would
+// reset unsaved ticks, the same exposure the schedule modal's time inputs have.
+function renderDutyModal() {
+  if (!state.selectedDutyCell) return '';
+  const { staffId, date } = state.selectedDutyCell;
+  const employee = state.staff.find((entry) => entry.id === staffId);
+  if (!employee || !roleAtLeast('Manager')) {
+    state.selectedDutyCell = null;
+    return '';
+  }
+  const current = dutyListFor(staffId, date);
+  // A duty saved earlier but since removed from DUTY_OPTIONS would otherwise
+  // vanish from the picker and get silently dropped on the next save, so any
+  // such leftover is listed (and pre-ticked) alongside the current options.
+  const options = [...DUTY_OPTIONS, ...current.filter((duty) => !DUTY_OPTIONS.includes(duty))];
+  const checkboxes = options.map((duty, index) => `
+    <label class="duty-option">
+      <input type="checkbox" class="duty-option-input" id="duty-option-${index}" value="${duty}" ${current.includes(duty) ? 'checked' : ''} />
+      <span>${duty}</span>
+    </label>
+  `).join('');
+  return `
+    <div class="modal-backdrop" data-close-action="close-duty-cell">
+      <div class="modal-card">
+        <h3 style="margin:0 0 0.5rem">${employee.name} · ${formatDate(date)}</h3>
+        <p class="muted small" style="margin:0 0 0.6rem">เลือกหน้าที่ได้มากกว่า 1 อย่าง</p>
+        <div class="duty-option-list">${checkboxes}</div>
+        <div class="row" style="margin-top:0.8rem">
+          <button class="btn" data-action="save-duty-cell">บันทึก</button>
+          ${current.length ? `<button class="btn secondary" data-action="clear-duty-cell">ล้างหน้าที่วันนี้</button>` : ''}
+          <button class="btn secondary" data-action="close-duty-cell">ปิด</button>
         </div>
       </div>
     </div>
@@ -2038,6 +2212,14 @@ async function handleForm(name, formData) {
     render();
   }
 
+  if (name === 'duty-month-form') {
+    // No role gate — changing the month only changes what's read, and the
+    // roster is readable by everyone. Re-subscribes the month-scoped watcher.
+    state.dutyMonth = formData.get('month') || monthISO();
+    watchDutiesForCurrentMonth();
+    render();
+  }
+
   if (name === 'schedule-month-form') {
     // No role gate — this only changes which month is being viewed (an
     // Employee's own read-only monthly schedule included), it never writes.
@@ -2552,6 +2734,77 @@ async function handleAction(action, data) {
     await DB.put('staff', archived);
     upsertLocal('staff', archived);
     pushNotification('บันทึกการลาออก', `${state.currentStaff?.name || 'ผู้ใช้'} บันทึกการลาออกของ ${person.name} วันที่ ${formatDate(today)}`);
+    render();
+    return;
+  }
+
+  if (action === 'select-duty-cell') {
+    if (!roleAtLeast('Manager')) return;
+    state.selectedDutyCell = { staffId: data.staffId, date: data.date };
+    render();
+    return;
+  }
+
+  if (action === 'close-duty-cell') {
+    state.selectedDutyCell = null;
+    render();
+    return;
+  }
+
+  if (action === 'save-duty-cell') {
+    if (!roleAtLeast('Manager')) return;
+    if (!state.selectedDutyCell) return;
+    const { staffId, date } = state.selectedDutyCell;
+    const employee = state.staff.find((entry) => entry.id === staffId);
+    if (!employee) return;
+    const duties = Array.from(document.querySelectorAll('.duty-option-input:checked')).map((input) => input.value);
+    const id = `${date}_${staffId}`;
+    // Ticking everything off is the same thing as clearing the cell, and an
+    // empty doc would otherwise sit in the collection being read back every
+    // month the roster is opened — delete rather than store an empty array.
+    if (!duties.length) {
+      await DB.del('duties', id);
+      removeLocal('duties', id);
+      state.selectedDutyCell = null;
+      await pushNotification('ล้างหน้าที่', `${state.currentStaff?.name || ''} ล้างหน้าที่ของ ${employee.name} วันที่ ${formatDate(date)}`);
+      render();
+      return;
+    }
+    const record = {
+      id,
+      staffId,
+      date,
+      duties,
+      updatedAt: nowISO(),
+      updatedBy: state.currentUser?.uid || ''
+    };
+    try {
+      await DB.put('duties', record);
+      upsertLocal('duties', record);
+      state.selectedDutyCell = null;
+      await pushNotification('กำหนดหน้าที่', `${state.currentStaff?.name || ''} กำหนดหน้าที่ของ ${employee.name} วันที่ ${formatDate(date)}: ${duties.join(', ')}`);
+    } catch (error) {
+      // Same reasoning as update-item-quantity: a rules rejection here
+      // (duties is a new collection — the console needs the updated
+      // firestore.rules pasted in) would otherwise fail silently, leaving the
+      // ticked boxes on screen looking saved.
+      console.error('save-duty-cell failed', error);
+      alert('บันทึกไม่สำเร็จ: ' + (error.message || error));
+    }
+    render();
+    return;
+  }
+
+  if (action === 'clear-duty-cell') {
+    if (!roleAtLeast('Manager')) return;
+    if (!state.selectedDutyCell) return;
+    const { staffId, date } = state.selectedDutyCell;
+    const employee = state.staff.find((entry) => entry.id === staffId);
+    const id = `${date}_${staffId}`;
+    await DB.del('duties', id);
+    removeLocal('duties', id);
+    state.selectedDutyCell = null;
+    await pushNotification('ล้างหน้าที่', `${state.currentStaff?.name || ''} ล้างหน้าที่ของ ${employee?.name || ''} วันที่ ${formatDate(date)}`);
     render();
     return;
   }

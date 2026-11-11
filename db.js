@@ -146,6 +146,31 @@ const DB = {
     return snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
   },
 
+  // duties is a per-day-per-person grid, so it grows at exactly the rate
+  // attendance does — headcount x ~30 docs every month, forever. Unlike
+  // attendance, though, nothing in the app ever needs two months of it at
+  // once (renderFinancial reads the previous month of attendance for its
+  // comparison card; the duty roster has no such view), so this watcher is
+  // scoped to the single month on screen from the start rather than
+  // watching the whole collection and re-reading every month ever recorded
+  // on every app open. The caller re-subscribes when the month changes.
+  // The upper bound is a plain string compare against '<month>-31', which is
+  // correct for every month: '2026-02-31' sorts after '2026-02-28' even
+  // though it isn't a real date. Single-field range filter, so Firestore's
+  // automatic index covers it — no composite index to create in the console.
+  watchDutiesForMonth(month, callback) {
+    return firestore
+      .collection('duties')
+      .where('date', '>=', `${month}-01`)
+      .where('date', '<=', `${month}-31`)
+      .onSnapshot(
+        (snapshot) => {
+          callback(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
+        },
+        (error) => console.error('watchDutiesForMonth failed', error)
+      );
+  },
+
   async getOnce(collection, id) {
     const doc = await firestore.collection(collection).doc(id).get();
     return doc.exists ? { id: doc.id, ...doc.data() } : null;

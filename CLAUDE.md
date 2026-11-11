@@ -209,7 +209,7 @@ changing permissions: `render()`'s nav gating, each `handleAction`/`handleForm` 
   onSnapshot" architecture, not a new mechanism.
 - **Manager**: add/remove `Employee`-role staff (from the Timesheet page's own "Remove
   employee" button, not the Admin page — Managers can't reach `/admin` or `/financial` at all),
-  mark attendance, plan the monthly schedule grid (see Business logic section below), manage
+  mark attendance, assign duties on the ตารางหน้าที่ roster (`duties`, see the Data model section), plan the monthly schedule grid (see Business logic section below), manage
   warehouse items, create/manage checklists. Cannot touch Manager/Admin/Owner accounts, and
   **cannot see `dailyRate` or any computed `pay` figure anywhere in the app, not even their own**
   — `renderTimesheet`'s `showSalary = roleAtLeast('Admin') || !canManage` flag hides both from
@@ -456,6 +456,18 @@ listeners instead of each opening its own.) This was reasoned through with the u
 the conclusion was that the only lever that actually moves read volume is narrowing what the
 watchers subscribe to — the `notifications` live-window shape described above.
 
+`duties` (added Nov 2026) is the second collection to get a capped watcher, and the first built
+that way from the start: `DB.watchDutiesForMonth(month, cb)` subscribes to one month at a time
+(`where('date','>=','<month>-01')` / `<= '<month>-31'` — a string compare, correct for every month
+since `'2026-02-31'` sorts after `'2026-02-28'`; single-field range, so no composite index to
+create in the console). It grows at exactly `attendance`'s rate, so watching it whole would have
+added a second collection of that size to every app open. It re-subscribes when the month picker
+moves — `watchDutiesForCurrentMonth()` in `app.js` drops the previous listener first (they would
+otherwise stack as someone pages through months) and clears `state.duties` immediately, so the
+old month's rows aren't briefly drawn against the new month's dates. This is the re-subscribing
+shape the `attendance` analysis below describes, minus its hard part: nothing in the app needs
+two months of duties at once, where `renderFinancial` genuinely needs two months of attendance.
+
 If read cost ever does need attacking, the agreed order is **`attendance` first**, scoped to the
 viewed month rather than watched whole: it grows by roughly headcount × 30 docs every month,
 forever, and is the larger of the two candidates. The complication specific to it is that
@@ -593,7 +605,7 @@ Restaurant staff use this on their phones, so these are checked for every new UI
 
 ## Data model (Didi Malatang Hub-specific)
 
-Firestore collections: `staff`, `attendance`, `warehouseItems`, `warehouseLogs`, `routines`,
+Firestore collections: `staff`, `attendance`, `duties`, `warehouseItems`, `warehouseLogs`, `routines`,
 `routineInspections`, `notifications`, `holidays`, `fixedCosts`. No Storage bucket — see the "no
 Firebase Storage" note above; images live inline on the docs below as base64 data URLs.
 
@@ -616,6 +628,29 @@ Firebase Storage" note above; images live inline on the docs below as base64 dat
   add-on already baked into `pay`; always explicitly `true`/`false` on every write, never left to
   merge-through, see Business logic section above), `updatedBy` (the acting user's Auth uid — set
   by every write path, see Business logic section above), `createdAt`.
+- **`duties`** (ตารางหน้าที่ / duty roster — doc ID = `` `${date}_${staffId}` ``, the same
+  deterministic key `attendance` uses, so re-assigning a person's duties for a day upserts):
+  `staffId`, `date` (`YYYY-MM-DD`), `duties` (array of Thai duty strings), `updatedAt`,
+  `updatedBy`. Rendered by `renderDuties()` (nav "ตารางหน้าที่", `state.view === 'duties'`) as the
+  same one-row-per-day × one-column-per-staff grid as the monthly schedule, transcribed from the
+  shop's existing sheet. Manager+ taps a cell to open `renderDutyModal()`, a checkbox multi-select;
+  Employees get the identical grid as inert `<span>`s, same split as the Timesheet grid.
+  - **The option list is a hardcoded array, `DUTY_OPTIONS` in `app.js`** (19 entries, transcribed
+    from the photo of the shop's sheet), not a Firestore collection and not free text. The point of
+    a fixed list is that the same job is spelled identically in every cell, so grouping or counting
+    by duty stays possible later; adding one means editing that array. A duty *removed* from the
+    array still displays wherever it was already saved and is listed (pre-ticked) in the picker for
+    any cell that already holds it, specifically so an edit to an unrelated duty doesn't silently
+    drop it. These are the one case of Thai strings stored as Firestore *values* rather than
+    English-plus-a-label-map (contrast `staff.role` / `employmentType`) — nothing compares against
+    them in logic, they're only ever displayed, so there's no English value to keep.
+  - **No duty doc stores "day off" or "not employed"** — those two cell states are read live from
+    `attendance` (`dayOff`) and the employment window (`isEmployedOn`), exactly as the schedule
+    grid does, so the two grids can't disagree about who is even working. A day-off cell is inert
+    even for a Manager: fix it from the ลงเวลา tab, not here.
+  - Saving with every box unticked **deletes** the doc rather than storing `duties: []`, same
+    reasoning as `clear-schedule-cell` — an empty doc would sit in the collection being re-read
+    every time that month's roster is opened.
 - **`warehouseItems`**: `category` (free text — no fixed/enforced category list server-side, same
   convention as `unit`; the Warehouse view groups items into collapsible sections by this field,
   falling back to `'อื่นๆ'` when unset). The "เพิ่มสินค้า" create-item form offers two ways to set

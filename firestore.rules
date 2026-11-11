@@ -89,6 +89,15 @@ service cloud.firestore {
         || (roleAtLeast('Manager') && resource.data.role == 'Employee');
     }
 
+    // Duty roster (ตารางหน้าที่): who does which jobs on which day. Readable
+    // by everyone signed in — the roster is a read-only view for an Employee,
+    // exactly like the monthly schedule grid — and written by Manager+, the
+    // same level that marks attendance.
+    match /duties/{dutyId} {
+      allow read: if isSignedIn();
+      allow write: if roleAtLeast('Manager');
+    }
+
     match /attendance/{attendanceId} {
       allow read: if isSignedIn();
       allow write: if roleAtLeast('Manager');
