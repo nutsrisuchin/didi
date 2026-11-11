@@ -648,6 +648,20 @@ Firebase Storage" note above; images live inline on the docs below as base64 dat
     `attendance` (`dayOff`) and the employment window (`isEmployedOn`), exactly as the schedule
     grid does, so the two grids can't disagree about who is even working. A day-off cell is inert
     even for a Manager: fix it from the ลงเวลา tab, not here.
+  - **`DUTY_SHEET_IMPORT_NAMES` / `DUTY_SHEET_IMPORT_ROWS`** is a one-time backfill of the shop's
+    existing 30-day paper roster, transcribed from a photo of it — same idea as
+    `STOCK_HISTORY_DATA` for warehouse logs. Columns are the sheet's own order **minus ตาล**, who
+    the user asked to leave out; a `null` cell is a red (day-off) box. The `import-duty-sheet`
+    action (Manager+) writes it into whichever month `state.dutyMonth` points at, matching columns
+    to staff by **exact name** — anyone hired since, or spelled differently in the app, gets no
+    rows and stays blank, which was the explicit ask rather than a failure mode. The button is
+    rendered only while the viewed month has no duty docs at all, the same "guard on the data, not
+    on a flag" trick `import-stock-seed` uses. It **never touches `attendance`**: the sheet's red
+    cells are skipped rather than marked as days off, since writing those would change that
+    person's pay — if the day-offs are wanted too, that is a separate decision to confirm.
+    Days outside the employment window and days already marked off are skipped for the same
+    reason the grid makes those cells inert. Writes go in batches of 20 (~150 docs otherwise means
+    ~150 sequential awaits on a phone connection).
   - Saving with every box unticked **deletes** the doc rather than storing `duties: []`, same
     reasoning as `clear-schedule-cell` — an empty doc would sit in the collection being re-read
     every time that month's roster is opened.

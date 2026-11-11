@@ -60,6 +60,50 @@ const DUTY_OPTIONS = [
   'ยืนเครื่อง',
   'คอยเสริม'
 ];
+
+// One-time import of the shop's existing 30-day ตารางหน้าที่, transcribed from
+// a photo of the sheet. Columns are in the sheet's own left-to-right order
+// minus ตาล, who the user asked to leave out; a null cell is a red (day-off)
+// box on the sheet. Matched to staff by exact name at import time, so anyone
+// hired since — or whose name in the app is spelled differently — simply gets
+// no rows and stays blank, which is the asked-for behaviour rather than a
+// failure. Every string here is already in DUTY_OPTIONS; the sheet's one
+// "จัดถาด" shorthand (day 9, กิ๊ก) is recorded as จัดถาดเหล็ก like every other
+// cell, since nothing else in the sheet distinguishes the two.
+const DUTY_SHEET_IMPORT_NAMES = ['ข้าว', 'ปาย', 'พี่มาย', 'กิ๊ก', 'บิว', 'เลิฟ'];
+const DUTY_SHEET_IMPORT_ROWS = [
+  [['เข้าบ่าย', 'ทำซุป'], ['จัดถาดเหล็ก', 'กวาดถูครัว', 'ผัดแห้ง', 'ทอด'], null, ['จัดผัก', 'ของน้ำ', 'โซนน้ำซุป', 'เครื่องปรุง', 'กวาดถูครัว'], ['รีดน้ำ', 'ขึ้นถาดเหล็ก', 'เติมของ'], ['คอยเสริม']],
+  [['จัดผัก', 'ของน้ำ', 'เติมของ'], ['โซนน้ำซุป', 'กวาดถูครัว', 'ลวกของ'], ['จัดถาดเหล็ก', 'เครื่องปรุง', 'ทำซุป'], ['ล้างผัก', 'กวาดถู', 'เช็ดโต๊ะ'], null, ['คอยเสริม']],
+  [['จัดผัก', 'ของน้ำ', 'ทำซุป'], null, ['จัดถาดเหล็ก', 'กวาดถูครัว', 'ผัดแห้ง', 'ทอด'], ['รีดน้ำ', 'ขึ้นถาดเหล็ก', 'เครื่องปรุง'], ['คอยเสริม'], ['คอยเสริม']],
+  [['ล้างผัก', 'กวาดถู', 'เช็ดโต๊ะ', 'ผัดแห้ง', 'ทอด'], ['รีดน้ำ', 'ขึ้นถาดเหล็ก', 'ทำซุป'], ['โซนน้ำซุป', 'เครื่องปรุง', 'กวาดถูครัว', 'ลวกของ'], ['จัดผัก', 'ของน้ำ', 'จัดถาดเหล็ก'], ['คอยเสริม'], ['คอยเสริม']],
+  [null, ['จัดผัก', 'ของน้ำ', 'ลวกของ'], ['รีดน้ำ', 'ขึ้นถาดเหล็ก', 'เช็ดโต๊ะ', 'ทำซุป'], ['โซนน้ำซุป', 'ล้างผัก', 'กวาดถู'], ['คอยเสริม'], ['คอยเสริม']],
+  [['จัดถาดเหล็ก', 'กวาดถูครัว', 'ลวกของ'], ['ล้างผัก', 'กวาดถู', 'เช็ดโต๊ะ', 'ผัดแห้ง', 'ทอด'], ['จัดผัก', 'ของน้ำ', 'ทำซุป'], ['รีดน้ำ', 'ขึ้นถาดเหล็ก'], ['คอยเสริม'], ['คอยเสริม']],
+  [['โซนน้ำซุป', 'เครื่องปรุง', 'ทำซุป'], ['จัดถาดเหล็ก', 'ยืนเครื่อง'], ['ล้างผัก', 'กวาดถู', 'เช็ดโต๊ะ', 'ผัดแห้ง', 'ทอด'], null, ['คอยเสริม'], ['คอยเสริม']],
+  [['รีดน้ำ', 'ขึ้นถาดเหล็ก', 'กวาดถูครัว', 'ลวกของ'], ['จัดผัก', 'ของน้ำ', 'เติมของ'], ['โซนน้ำซุป', 'เครื่องปรุง', 'ทำซุป'], ['ล้างผัก', 'กวาดถู', 'เช็ดโต๊ะ'], ['คอยเสริม'], null],
+  [['จัดผัก', 'ของน้ำ', 'รีดน้ำ', 'ผัดแห้ง', 'ทอด'], ['โซนน้ำซุป', 'เครื่องปรุง', 'กวาดถูครัว', 'ทำซุป'], null, ['จัดถาดเหล็ก', 'ขึ้นถาดเหล็ก'], ['คอยเสริม'], ['คอยเสริม']],
+  [['จัดถาดเหล็ก', 'กวาดถูครัว', 'ทำซุป'], ['รีดน้ำ', 'ขึ้นถาดเหล็ก', 'ผัดแห้ง', 'ทอด'], ['โซนน้ำซุป', 'จัดผัก', 'ของน้ำ', 'ลวกของ'], ['ล้างผัก', 'เครื่องปรุง', 'กวาดถู', 'เช็ดโต๊ะ'], ['คอยเสริม'], ['คอยเสริม']],
+  [['ล้างผัก', 'กวาดถู', 'เช็ดโต๊ะ', 'ลวกของ'], null, ['จัดถาดเหล็ก', 'โซนน้ำซุป', 'ทำซุป'], ['รีดน้ำ', 'ขึ้นถาดเหล็ก', 'เครื่องปรุง'], ['คอยเสริม'], ['คอยเสริม']],
+  [['โซนน้ำซุป', 'เครื่องปรุง', 'ทำซุป'], ['ล้างผัก', 'กวาดถู', 'เช็ดโต๊ะ', 'ผัดแห้ง', 'ทอด'], ['จัดผัก', 'ของน้ำ', 'เติมของ'], ['จัดถาดเหล็ก', 'กวาดถูครัว'], ['คอยเสริม'], ['คอยเสริม']],
+  [null, ['จัดถาดเหล็ก', 'กวาดถูครัว', 'ลวกของ'], ['ล้างผัก', 'กวาดถู', 'เช็ดโต๊ะ', 'ทำซุป'], ['จัดผัก', 'ของน้ำ', 'รีดน้ำ', 'ขึ้นถาดเหล็ก'], ['คอยเสริม'], ['คอยเสริม']],
+  [['ล้างผัก', 'กวาดถู', 'เช็ดโต๊ะ', 'ลวกของ'], ['โซนน้ำซุป', 'กวาดถูครัว', 'ทำซุป'], ['รีดน้ำ', 'ขึ้นถาดเหล็ก', 'ผัดแห้ง', 'ทอด'], ['จัดผัก', 'ของน้ำ', 'เครื่องปรุง'], ['คอยเสริม'], ['คอยเสริม']],
+  [['รีดน้ำ', 'ขึ้นถาดเหล็ก', 'กวาดถูครัว', 'ทำซุป'], ['จัดถาดเหล็ก', 'ยืนเครื่อง'], ['โซนน้ำซุป', 'เครื่องปรุง', 'ลวกของ'], null, ['คอยเสริม'], ['คอยเสริม']],
+  [['จัดผัก', 'ของน้ำ', 'รีดน้ำ', 'ผัดแห้ง', 'ทอด'], ['ล้างผัก', 'กวาดถู', 'เช็ดโต๊ะ', 'เติมของ'], ['จัดถาดเหล็ก', 'กวาดถูครัว', 'ทำซุป'], ['โซนน้ำซุป', 'เครื่องปรุง'], null, null],
+  [['จัดถาดเหล็ก', 'กวาดถูครัว', 'ทำซุป'], null, ['จัดผัก', 'ของน้ำ', 'รีดน้ำ', 'ลวกของ'], ['ล้างผัก', 'กวาดถู', 'เช็ดโต๊ะ', 'ขึ้นถาดเหล็ก'], ['คอยเสริม'], ['คอยเสริม']],
+  [['ล้างผัก', 'กวาดถู', 'เช็ดโต๊ะ', 'ขึ้นถาดเหล็ก', 'ลวกของ'], ['โซนน้ำซุป', 'เครื่องปรุง', 'ทำซุป'], null, ['จัดผัก', 'ของน้ำ', 'รีดน้ำ'], ['คอยเสริม'], ['คอยเสริม']],
+  [null, ['จัดถาดเหล็ก', 'กวาดถูครัว', 'ผัดแห้ง', 'ทอด'], ['รีดน้ำ', 'ขึ้นถาดเหล็ก', 'เครื่องปรุง', 'ทำซุป'], ['จัดผัก', 'ของน้ำ', 'โซนน้ำซุป'], ['คอยเสริม'], ['คอยเสริม']],
+  [['รีดน้ำ', 'ขึ้นถาดเหล็ก', 'ผัดแห้ง', 'ทอด'], ['จัดผัก', 'ของน้ำ', 'เครื่องปรุง', 'ทำซุป'], ['โซนน้ำซุป', 'จัดถาดเหล็ก', 'ลวกของ'], ['ล้างผัก', 'กวาดถู', 'เช็ดโต๊ะ'], ['คอยเสริม'], ['คอยเสริม']],
+  [['โซนน้ำซุป', 'เครื่องปรุง', 'ทำซุป'], ['ล้างผัก', 'กวาดถู', 'เช็ดโต๊ะ', 'เติมของ'], ['จัดผัก', 'ของน้ำ', 'ผัดแห้ง', 'ทอด'], ['จัดถาดเหล็ก', 'กวาดถูครัว'], ['คอยเสริม'], ['คอยเสริม']],
+  [['รีดน้ำ', 'ขึ้นถาดเหล็ก', 'กวาดถูครัว', 'ลวกของ'], ['จัดถาดเหล็ก', 'กวาดถูครัว', 'ผัดแห้ง', 'ทอด'], ['ล้างผัก', 'กวาดถู', 'เช็ดโต๊ะ', 'ทำซุป'], ['จัดผัก', 'ของน้ำ'], ['คอยเสริม'], ['คอยเสริม']],
+  [['ล้างผัก', 'กวาดถู', 'เช็ดโต๊ะ', 'กวาดถูครัว', 'ทำซุป'], ['โซนน้ำซุป', 'รีดน้ำ', 'ยืนเครื่อง'], ['จัดถาดเหล็ก', 'ขึ้นถาดเหล็ก', 'ลวกของ'], null, ['คอยเสริม'], ['คอยเสริม']],
+  [['จัดถาดเหล็ก', 'ขึ้นถาดเหล็ก', 'ลวกของ'], ['จัดผัก', 'ของน้ำ', 'เครื่องปรุง', 'ผัดแห้ง', 'ทอด'], ['โซนน้ำซุป', 'รีดน้ำ', 'ทำซุป'], ['ล้างผัก', 'กวาดถู', 'เช็ดโต๊ะ', 'กวาดถูครัว'], ['คอยเสริม'], ['คอยเสริม']],
+  [['จัดผัก', 'ของน้ำ', 'เครื่องปรุง', 'ผัดแห้ง', 'ทอด'], ['จัดถาดเหล็ก', 'ขึ้นถาดเหล็ก', 'ทำซุป'], null, ['โซนน้ำซุป', 'รีดน้ำ'], ['คอยเสริม'], null],
+  [['โซนน้ำซุป', 'รีดน้ำ', 'ทำซุป'], null, ['ล้างผัก', 'กวาดถู', 'เช็ดโต๊ะ', 'กวาดถูครัว', 'ลวกของ'], ['จัดผัก', 'ของน้ำ', 'เครื่องปรุง'], ['คอยเสริม'], ['คอยเสริม']],
+  [['รีดน้ำ', 'ขึ้นถาดเหล็ก', 'กวาดถูครัว', 'ลวกของ'], ['ล้างผัก', 'กวาดถู', 'เช็ดโต๊ะ', 'เติมของ'], ['จัดผัก', 'ของน้ำ', 'ทำซุป'], ['จัดถาดเหล็ก', 'กวาดถูครัว'], ['คอยเสริม'], ['คอยเสริม']],
+  [['ล้างผัก', 'กวาดถู', 'เช็ดโต๊ะ', 'เติมของ'], ['จัดถาดเหล็ก', 'กวาดถูครัว', 'ทำซุป'], ['โซนน้ำซุป', 'เครื่องปรุง', 'ผัดแห้ง', 'ทอด'], ['จัดผัก', 'ของน้ำ'], ['คอยเสริม'], ['คอยเสริม']],
+  [['จัดถาดเหล็ก', 'ขึ้นถาดเหล็ก', 'ทำซุป'], ['โซนน้ำซุป', 'รีดน้ำ', 'ยืนเครื่อง'], ['ล้างผัก', 'กวาดถู', 'เช็ดโต๊ะ', 'กวาดถูครัว', 'ลวกของ'], null, ['คอยเสริม'], ['คอยเสริม']],
+  [null, ['จัดผัก', 'ของน้ำ', 'เครื่องปรุง', 'ผัดแห้ง', 'ทอด'], ['จัดถาดเหล็ก', 'ขึ้นถาดเหล็ก', 'ทำซุป'], ['โซนน้ำซุป', 'รีดน้ำ'], ['คอยเสริม'], ['คอยเสริม']]
+];
+
 const THAI_MONTH_FULL = [
   'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
   'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'
@@ -991,6 +1035,11 @@ function renderDuties() {
         <p class="muted small" style="margin-top:0.5rem">${canManage
           ? 'แตะช่องของพนักงานเพื่อเลือกหน้าที่ เลือกได้มากกว่า 1 อย่างต่อวัน · ช่อง "หยุด" มาจากแท็บลงเวลา ต้องแก้ที่นั่น'
           : 'ดูอย่างเดียว — ผู้จัดการขึ้นไปเป็นผู้กำหนดหน้าที่'}</p>
+        ${canManage && !state.duties.length ? `
+          <div class="row" style="margin-top:0.6rem">
+            <button class="btn secondary" data-action="import-duty-sheet">นำเข้าตารางหน้าที่จากเอกสารเดิม (30 วัน)</button>
+          </div>
+        ` : ''}
         ${staffList.length
           ? `<div style="overflow-x:auto; margin-top:0.8rem;">
               <table class="schedule-table duty-table">
@@ -2734,6 +2783,98 @@ async function handleAction(action, data) {
     await DB.put('staff', archived);
     upsertLocal('staff', archived);
     pushNotification('บันทึกการลาออก', `${state.currentStaff?.name || 'ผู้ใช้'} บันทึกการลาออกของ ${person.name} วันที่ ${formatDate(today)}`);
+    render();
+    return;
+  }
+
+  if (action === 'import-duty-sheet') {
+    // One-time backfill of the shop's paper roster into whichever month is on
+    // screen. Same "guard on the data, not on a flag" trick import-stock-seed
+    // uses: the button is only rendered while this month has no duty docs at
+    // all, so there's no separate "already imported" document to maintain.
+    if (!roleAtLeast('Manager')) return;
+    const month = state.dutyMonth;
+    const dates = datesInMonth(month);
+    const columns = DUTY_SHEET_IMPORT_NAMES.map((sheetName) => ({
+      sheetName,
+      person: state.staff.find((entry) => (entry.name || '').trim() === sheetName) || null
+    }));
+    const missing = columns.filter((column) => !column.person).map((column) => column.sheetName);
+    if (columns.every((column) => !column.person)) {
+      alert(`ไม่พบชื่อพนักงานในแอปที่ตรงกับเอกสารเลย (${DUTY_SHEET_IMPORT_NAMES.join(', ')}) — ตรวจสอบการสะกดชื่อในหน้าแอดมินก่อน`);
+      return;
+    }
+
+    const records = [];
+    let skippedDayOff = 0;
+    let skippedNotEmployed = 0;
+    DUTY_SHEET_IMPORT_ROWS.forEach((row, dayIndex) => {
+      // A month shorter than the sheet (February, or a 30-row sheet against a
+      // 31-day month) just runs out of dates — the extra rows are dropped and
+      // any extra day is left blank rather than guessed at.
+      const dateStr = dates[dayIndex];
+      if (!dateStr) return;
+      row.forEach((duties, columnIndex) => {
+        const person = columns[columnIndex]?.person;
+        if (!person || !duties) return;
+        // The sheet's red cells are days off, but marking attendance here
+        // would change that person's pay for the day — far beyond "copy the
+        // duties across". Those cells are skipped; so are days outside the
+        // employment window and days already marked off in ลงเวลา, since a
+        // duty doc on either renders as an unreachable cell anyway.
+        if (!isEmployedOn(person, dateStr)) {
+          skippedNotEmployed++;
+          return;
+        }
+        if (getAttendanceForDate(person.id, dateStr)?.dayOff === true) {
+          skippedDayOff++;
+          return;
+        }
+        records.push({
+          id: `${dateStr}_${person.id}`,
+          staffId: person.id,
+          date: dateStr,
+          duties,
+          updatedAt: nowISO(),
+          updatedBy: state.currentUser?.uid || ''
+        });
+      });
+    });
+
+    if (!records.length) {
+      alert('ไม่มีข้อมูลที่นำเข้าได้สำหรับเดือนนี้');
+      return;
+    }
+    const confirmed = confirm(
+      `นำเข้าตารางหน้าที่ ${records.length} ช่อง ลงเดือน ${formatMonthLabel(month)}\n\n` +
+      `พนักงานที่จับคู่ได้: ${columns.filter((column) => column.person).map((column) => column.sheetName).join(', ')}\n` +
+      (missing.length ? `ไม่พบชื่อในแอป (จะเว้นว่างไว้): ${missing.join(', ')}\n` : '') +
+      `\nช่องสีแดง (วันหยุด) ในเอกสารจะถูกข้าม และจะไม่แก้ข้อมูลการลงเวลา/เงินเดือนใดๆ ทั้งสิ้น\n` +
+      `ช่องที่มีหน้าที่อยู่แล้วในเดือนนี้จะถูกเขียนทับ ดำเนินการต่อหรือไม่?`
+    );
+    if (!confirmed) return;
+
+    try {
+      // Written in small batches rather than one await per doc: ~150 writes
+      // sequentially is a visibly long wait on a phone connection.
+      for (let index = 0; index < records.length; index += 20) {
+        const chunk = records.slice(index, index + 20);
+        await Promise.all(chunk.map((record) => DB.put('duties', record)));
+        chunk.forEach((record) => upsertLocal('duties', record));
+      }
+      await pushNotification(
+        'นำเข้าตารางหน้าที่',
+        `${state.currentStaff?.name || ''} นำเข้าตารางหน้าที่จากเอกสารเดิม ${records.length} ช่อง ลงเดือน ${formatMonthLabel(month)}`
+      );
+      alert(
+        `นำเข้าสำเร็จ ${records.length} ช่อง` +
+        (skippedDayOff ? `\nข้าม ${skippedDayOff} ช่องที่ถูกทำเครื่องหมายวันหยุดไว้แล้ว` : '') +
+        (skippedNotEmployed ? `\nข้าม ${skippedNotEmployed} ช่องที่อยู่นอกช่วงการจ้างงาน` : '')
+      );
+    } catch (error) {
+      console.error('import-duty-sheet failed', error);
+      alert('นำเข้าไม่สำเร็จ: ' + (error.message || error));
+    }
     render();
     return;
   }
